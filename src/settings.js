@@ -1389,6 +1389,94 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     checkDbnetModel();
     
+    // DexiNed 模型检查和管理
+    const dexinedModelStatus = document.getElementById('dexinedModelStatus');
+    const btnImportDexinedModel = document.getElementById('btnImportDexinedModel');
+    const btnDeleteDexinedModel = document.getElementById('btnDeleteDexinedModel');
+    
+    async function checkDexiNedModel() {
+        if (!window.__TAURI__ || !dexinedModelStatus) return;
+        
+        try {
+            const { invoke } = window.__TAURI__.core;
+            const exists = await invoke('check_dexined_model');
+            
+            if (exists) {
+                dexinedModelStatus.textContent = '已安装';
+                dexinedModelStatus.style.color = '#27ae60';
+                if (btnImportDexinedModel) btnImportDexinedModel.style.display = 'none';
+                if (btnDeleteDexinedModel) btnDeleteDexinedModel.style.display = 'inline-block';
+            } else {
+                dexinedModelStatus.textContent = '未安装';
+                dexinedModelStatus.style.color = '#e74c3c';
+                if (btnImportDexinedModel) btnImportDexinedModel.style.display = 'inline-block';
+                if (btnDeleteDexinedModel) btnDeleteDexinedModel.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('检查 DexiNed 模型状态失败:', error);
+            dexinedModelStatus.textContent = '检查失败';
+            dexinedModelStatus.style.color = '#e74c3c';
+        }
+    }
+    
+    // 导入 DexiNed 模型
+    if (btnImportDexinedModel && window.__TAURI__) {
+        btnImportDexinedModel.addEventListener('click', async () => {
+            try {
+                const { open } = window.__TAURI__.dialog;
+                const { invoke } = window.__TAURI__.core;
+                
+                const selected = await open({
+                    multiple: false,
+                    filters: [{
+                        name: 'ONNX Model',
+                        extensions: ['onnx']
+                    }]
+                });
+                
+                if (selected) {
+                    btnImportDexinedModel.disabled = true;
+                    btnImportDexinedModel.textContent = '导入中...';
+                    
+                    await invoke('import_dexined_model', { sourcePath: selected });
+                    
+                    btnImportDexinedModel.disabled = false;
+                    btnImportDexinedModel.textContent = '导入';
+                    
+                    showSettingsDialog('成功', 'DexiNed 模型导入成功！', 'success');
+                    await checkDexiNedModel();
+                }
+            } catch (error) {
+                console.error('导入 DexiNed 模型失败:', error);
+                btnImportDexinedModel.disabled = false;
+                btnImportDexinedModel.textContent = '导入';
+                showSettingsDialog('错误', `导入失败: ${error}`, 'error');
+            }
+        });
+    }
+    
+    // 删除 DexiNed 模型
+    if (btnDeleteDexinedModel && window.__TAURI__) {
+        btnDeleteDexinedModel.addEventListener('click', async () => {
+            try {
+                const { invoke } = window.__TAURI__.core;
+                
+                const confirmed = confirm('确定要删除 DexiNed 模型吗？');
+                if (!confirmed) return;
+                
+                await invoke('delete_dexined_model');
+                
+                showSettingsDialog('成功', 'DexiNed 模型已删除！', 'success');
+                await checkDexiNedModel();
+            } catch (error) {
+                console.error('删除 DexiNed 模型失败:', error);
+                showSettingsDialog('错误', `删除失败: ${error}`, 'error');
+            }
+        });
+    }
+    
+    checkDexiNedModel();
+    
     const restartModal = document.getElementById('restartModal');
     const restartLater = document.getElementById('restartLater');
     const restartNow = document.getElementById('restartNow');

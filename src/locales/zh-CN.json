@@ -145,6 +145,8 @@
     "importFailed": "导入失败",
     "clearComplete": "清除完成",
     "clearFailed": "清除失败",
+    "docScan": "文档扫描",
+    "docScanModels": "文档扫描模型",
     "openLogDirFailed": "打开日志目录失败",
     "noCameraPermission": "无摄像头权限",
     "noCameraDetected": "未检测到摄像头",

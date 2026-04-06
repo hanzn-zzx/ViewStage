@@ -145,6 +145,8 @@
     "importFailed": "Import Failed",
     "clearComplete": "Clear Complete",
     "clearFailed": "Clear Failed",
+    "docScan": "Document Scan",
+    "docScanModels": "Document Scan Models",
     "openLogDirFailed": "Failed to open log directory",
     "noCameraPermission": "No Camera Permission",
     "noCameraDetected": "No Camera Detected",
