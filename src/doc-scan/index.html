@@ -24,8 +24,16 @@
             </div>
 
             <div class="control-section">
-                <button class="action-btn primary" id="btnCapture" data-i18n="docScan.capture">拍摄</button>
-                <button class="action-btn" id="btnBack" data-i18n="docScan.back">返回</button>
+                <div class="scan-options">
+                    <label class="option-checkbox">
+                        <input type="checkbox" id="grayscaleToggle">
+                        <span data-i18n="docScan.grayscale">黑白模式</span>
+                    </label>
+                </div>
+                <div class="action-buttons">
+                    <button class="action-btn primary" id="btnCapture" data-i18n="docScan.capture">拍摄</button>
+                    <button class="action-btn" id="btnBack" data-i18n="docScan.back">返回</button>
+                </div>
             </div>
         </div>
 

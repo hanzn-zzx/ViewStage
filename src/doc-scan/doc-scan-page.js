@@ -29,6 +29,7 @@ async function init() {
 function initDOM() {
     dom.btnCapture = document.getElementById('btnCapture');
     dom.btnBack = document.getElementById('btnBack');
+    dom.grayscaleToggle = document.getElementById('grayscaleToggle');
     
     dom.previewVideo = document.getElementById('previewVideo');
     dom.previewCanvas = document.getElementById('previewCanvas');
@@ -181,8 +182,11 @@ async function invokeDocumentScan(imageData) {
     
     const { invoke } = window.__TAURI__.core;
     
+    const grayscale = dom.grayscaleToggle ? dom.grayscaleToggle.checked : false;
+    
     const request = {
-        image_data: imageData
+        image_data: imageData,
+        grayscale: grayscale
     };
     
     return await invoke('scan_document', { request });

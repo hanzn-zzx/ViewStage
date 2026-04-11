@@ -237,11 +237,47 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 16px;
     padding: 10px;
     background: rgba(250, 250, 250, 0.98);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+}
+
+.scan-options {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.option-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #555;
+    transition: all 0.2s ease;
+}
+
+.option-checkbox:hover {
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.option-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #3498db;
+    cursor: pointer;
+}
+
+.action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .control-panel {

@@ -38,10 +38,10 @@ use opencv::{
     core::{Mat, Vector, Size, Scalar, CV_32F, CV_8UC3, CV_8UC1, Point, Point2f, BorderTypes},
     dnn::{read_net_from_onnx, Net, blob_from_image},
     imgproc::{
-        resize, cvt_color, COLOR_BGR2GRAY,
+        resize, cvt_color, COLOR_BGR2GRAY, COLOR_BGR2Lab, COLOR_Lab2BGR,
         threshold, find_contours, contour_area,
         hough_lines_p, get_perspective_transform, warp_perspective,
-        THRESH_BINARY, INTER_LINEAR,
+        THRESH_BINARY, THRESH_OTSU, INTER_LINEAR,
     },
     photo::fast_nl_means_denoising,
     prelude::*,
@@ -1612,6 +1612,7 @@ async fn set_file_type_icons() -> Result<(), String> {
 pub struct DocumentScanRequest {
     pub image_data: String,
     pub east_model_path: Option<String>,
+    pub grayscale: Option<bool>,
 }
 
 /// 文档扫描结果
@@ -1788,6 +1789,7 @@ pub struct DocumentBoundaryResult {
 #[cfg(target_os = "windows")]
 fn detect_document_boundary_opencv(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Option<Vec<Point2f>> {
     let (width, height) = edge_image.dimensions();
+    let _img_area = width * height;
     
     let mut gray_mat = unsafe { Mat::new_rows_cols(height as i32, width as i32, CV_8UC1) }
         .ok()?;
@@ -1803,18 +1805,49 @@ fn detect_document_boundary_opencv(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) 
         }
     }
     
+    let mut blurred = Mat::default();
+    opencv::imgproc::gaussian_blur(
+        &gray_mat,
+        &mut blurred,
+        opencv::core::Size::new(5, 5),
+        0.0,
+        0.0,
+        opencv::core::BORDER_DEFAULT
+    ).ok()?;
+    
     let mut binary = Mat::default();
-    threshold(&gray_mat, &mut binary, 50.0, 255.0, THRESH_BINARY).ok()?;
+    threshold(&blurred, &mut binary, 0.0, 255.0, THRESH_BINARY | THRESH_OTSU).ok()?;
+    
+    let kernel = opencv::imgproc::get_structuring_element(
+        opencv::imgproc::MORPH_RECT,
+        opencv::core::Size::new(3, 3),
+        opencv::core::Point::new(-1, -1)
+    ).ok()?;
+    
+    let mut morphed = Mat::default();
+    opencv::imgproc::morphology_ex(
+        &binary,
+        &mut morphed,
+        opencv::imgproc::MORPH_CLOSE,
+        &kernel,
+        opencv::core::Point::new(-1, -1),
+        2,
+        opencv::core::BORDER_CONSTANT,
+        Scalar::default()
+    ).ok()?;
+    
+    let min_line_length = (width.min(height) as f32 * 0.1) as i32;
+    let max_line_gap = (width.min(height) as f32 * 0.05) as i32;
     
     let mut lines = Vector::<opencv::core::Vec4i>::new();
     hough_lines_p(
-        &binary,
+        &morphed,
         &mut lines,
         1.0,
         std::f64::consts::PI / 180.0,
         50,
-        50.0,
-        10.0
+        min_line_length as f64,
+        max_line_gap as f64
     ).ok()?;
     
     log::info!("检测到 {} 条直线", lines.len());
@@ -1847,6 +1880,15 @@ fn detect_document_boundary_opencv(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) 
         return None;
     }
     
+    horizontal_lines = merge_nearby_lines(&horizontal_lines, true);
+    vertical_lines = merge_nearby_lines(&vertical_lines, false);
+    
+    log::info!("合并后 - 水平线: {}, 垂直线: {}", horizontal_lines.len(), vertical_lines.len());
+    
+    if horizontal_lines.len() < 2 || vertical_lines.len() < 2 {
+        return None;
+    }
+    
     horizontal_lines.sort_by(|a, b| {
         let y_a = (a.1 + a.3) / 2.0;
         let y_b = (b.1 + b.3) / 2.0;
@@ -1869,6 +1911,14 @@ fn detect_document_boundary_opencv(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) 
     let bottom_left = line_intersection(bottom_line, left_line)?;
     let bottom_right = line_intersection(bottom_line, right_line)?;
     
+    if !is_valid_corner(&top_left, width, height) ||
+       !is_valid_corner(&top_right, width, height) ||
+       !is_valid_corner(&bottom_left, width, height) ||
+       !is_valid_corner(&bottom_right, width, height) {
+        log::warn!("角点超出图像边界，放弃检测");
+        return None;
+    }
+    
     let corners = vec![
         Point2f::new(top_left.0, top_left.1),
         Point2f::new(top_right.0, top_right.1),
@@ -1876,9 +1926,88 @@ fn detect_document_boundary_opencv(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) 
         Point2f::new(bottom_left.0, bottom_left.1),
     ];
     
+    if !validate_corners(&corners, width, height) {
+        log::warn!("角点验证失败，放弃检测");
+        return None;
+    }
+    
     log::info!("检测到文档角点: {:?}", corners);
     
     Some(corners)
+}
+
+fn merge_nearby_lines(lines: &[(f32, f32, f32, f32)], is_horizontal: bool) -> Vec<(f32, f32, f32, f32)> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    
+    let mut sorted_lines = lines.to_vec();
+    if is_horizontal {
+        sorted_lines.sort_by(|a, b| {
+            let y_a = (a.1 + a.3) / 2.0;
+            let y_b = (b.1 + b.3) / 2.0;
+            y_a.partial_cmp(&y_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    } else {
+        sorted_lines.sort_by(|a, b| {
+            let x_a = (a.0 + a.2) / 2.0;
+            let x_b = (b.0 + b.2) / 2.0;
+            x_a.partial_cmp(&x_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    
+    let mut merged: Vec<(f32, f32, f32, f32)> = Vec::new();
+    let threshold = 30.0f32;
+    
+    for line in sorted_lines {
+        if let Some(last) = merged.last_mut() {
+            let last_pos = if is_horizontal { (last.1 + last.3) / 2.0 } else { (last.0 + last.2) / 2.0 };
+            let curr_pos = if is_horizontal { (line.1 + line.3) / 2.0 } else { (line.0 + line.2) / 2.0 };
+            
+            if (curr_pos - last_pos).abs() < threshold {
+                last.0 = last.0.min(line.0);
+                last.1 = last.1.min(line.1);
+                last.2 = last.2.max(line.2);
+                last.3 = last.3.max(line.3);
+                continue;
+            }
+        }
+        merged.push(line);
+    }
+    
+    merged
+}
+
+fn is_valid_corner(point: &(f32, f32), width: u32, height: u32) -> bool {
+    let margin = -50.0f32;
+    point.0 >= margin && 
+    point.0 <= width as f32 - margin &&
+    point.1 >= margin && 
+    point.1 <= height as f32 - margin
+}
+
+fn validate_corners(corners: &[Point2f], width: u32, height: u32) -> bool {
+    if corners.len() != 4 {
+        return false;
+    }
+    
+    let min_area = (width as f32 * height as f32) * 0.1;
+    
+    let area = ((corners[0].x - corners[1].x) * (corners[0].y - corners[3].y)).abs();
+    
+    if area < min_area {
+        log::warn!("检测到的区域面积过小: {} < {}", area, min_area);
+        return false;
+    }
+    
+    let cross = (corners[1].x - corners[0].x) * (corners[3].y - corners[0].y) -
+                (corners[1].y - corners[0].y) * (corners[3].x - corners[0].x);
+    if cross < 0.0 {
+        log::warn!("角点顺序不正确（可能是顺时针）");
+        return false;
+    }
+    
+    true
 }
 
 /// 计算两条直线的交点
@@ -1956,23 +2085,48 @@ fn perspective_transform(img: &DynamicImage, corners: &[Point2f]) -> Option<Dyna
         Scalar::default()
     ).ok()?;
     
-    let result_height = dst_mat.rows() as u32;
-    let result_width = dst_mat.cols() as u32;
-    let result_data = dst_mat.data_bytes().ok()?;
-    
-    let mut result_img = ImageBuffer::new(result_width, result_height);
-    for y in 0..result_height {
-        for x in 0..result_width {
-            let idx = (y * result_width + x) as usize * 3;
-            let r = result_data.get(idx + 2).copied().unwrap_or(0);
-            let g = result_data.get(idx + 1).copied().unwrap_or(0);
-            let b = result_data.get(idx).copied().unwrap_or(0);
-            result_img.put_pixel(x, y, Rgb([r, g, b]));
+    let mut enhanced_mat = Mat::default();
+    {
+        let mut lab = Mat::default();
+        cvt_color(&dst_mat, &mut lab, COLOR_BGR2Lab, 0).ok()?;
+        
+        let mut lab_planes = Vector::<Mat>::new();
+        opencv::core::split(&lab, &mut lab_planes).ok()?;
+        
+        if lab_planes.len() >= 3 {
+            let mut l_channel = lab_planes.get(0).ok()?;
+            
+            let mut clahe = opencv::imgproc::create_clahe(2.0, opencv::core::Size::new(8, 8)).ok()?;
+            clahe.apply(&l_channel.clone(), &mut l_channel).ok()?;
+            
+            lab_planes.set(0, l_channel).ok()?;
+            
+            let mut merged_lab = Mat::default();
+            opencv::core::merge(&lab_planes, &mut merged_lab).ok()?;
+            
+            cvt_color(&merged_lab, &mut enhanced_mat, COLOR_Lab2BGR, 0).ok()?;
+        } else {
+            enhanced_mat = dst_mat.clone();
         }
     }
     
-    Some(DynamicImage::ImageRgb8(result_img))
-}
+    let result_height = enhanced_mat.rows() as u32;
+    let result_width = enhanced_mat.cols() as u32;
+    let result_data = enhanced_mat.data_bytes().ok()?;
+    
+    let mut result_img = ImageBuffer::new(result_width, result_height);
+        for y in 0..result_height {
+            for x in 0..result_width {
+                let idx = (y * result_width + x) as usize * 3;
+                let r = result_data.get(idx + 2).copied().unwrap_or(0);
+                let g = result_data.get(idx + 1).copied().unwrap_or(0);
+                let b = result_data.get(idx).copied().unwrap_or(0);
+                result_img.put_pixel(x, y, Rgb([r, g, b]));
+            }
+        }
+        
+        Some(DynamicImage::ImageRgb8(result_img))
+    }
 
 #[cfg(not(target_os = "windows"))]
 fn detect_document_boundary_opencv(_edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Option<Vec<(f32, f32)>> {
@@ -2145,8 +2299,9 @@ fn detect_text_dbnet(app: tauri::AppHandle, request: DBNetDetectionRequest) -> R
 #[tauri::command]
 async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> Result<DocumentScanResult, String> {
     let img = decode_base64_image(&request.image_data)?;
+    let grayscale = request.grayscale.unwrap_or(false);
     
-    log::info!("开始文档扫描，图像尺寸: {}x{}", img.width(), img.height());
+    log::info!("开始文档扫描，图像尺寸: {}x{}, 黑白模式: {}", img.width(), img.height(), grayscale);
     
     let models_dir = get_models_dir(&app)?;
     log::info!("模型目录: {:?}", models_dir);
@@ -2170,6 +2325,7 @@ async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> R
         let mut result_img = img.clone();
         let mut text_bbox: Option<(i32, i32, i32, i32)> = None;
         let mut used_dexined = false;
+        let output_grayscale = grayscale;
         
         if let Some(ref session) = dexined_session {
             log::info!("尝试使用 DexiNed 边界检测");
@@ -2228,7 +2384,7 @@ async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> R
             };
         }
 
-        let enhanced_img = match enhance_document_opencv(&result_img) {
+        let enhanced_img = match enhance_document_opencv(&result_img, output_grayscale) {
             Ok(img) => img,
             Err(e) => {
                 log::error!("图像增强失败: {}", e);
@@ -2340,8 +2496,32 @@ fn try_dexined_boundary_detection(img: &DynamicImage, session: &Arc<Mutex<ort::s
 // ==================== OpenCV 文档增强 ====================
 
 #[cfg(target_os = "windows")]
-fn enhance_document_opencv(img: &DynamicImage) -> Result<DynamicImage, String> {
-    let rgba = img.to_rgba8();
+fn enhance_document_opencv(img: &DynamicImage, grayscale: bool) -> Result<DynamicImage, String> {
+    if !grayscale {
+        return Ok(img.clone());
+    }
+    
+    let (orig_width, orig_height) = (img.width(), img.height());
+    
+    let max_process_size = 1280u32;
+    let scale = if orig_width > max_process_size || orig_height > max_process_size {
+        max_process_size as f32 / orig_width.max(orig_height) as f32
+    } else {
+        1.0
+    };
+    
+    let process_width = (orig_width as f32 * scale) as u32;
+    let process_height = (orig_height as f32 * scale) as u32;
+    
+    log::info!("黑白文档增强处理尺寸: {}x{} (缩放: {:.2})", process_width, process_height, scale);
+    
+    let processed_img = if scale < 1.0 {
+        img.resize_exact(process_width, process_height, image::imageops::FilterType::Triangle)
+    } else {
+        img.clone()
+    };
+    
+    let rgba = processed_img.to_rgba8();
     let (width, height) = rgba.dimensions();
     
     let mut bgr_mat = unsafe { Mat::new_rows_cols(height as i32, width as i32, CV_8UC3) }
@@ -2365,27 +2545,76 @@ fn enhance_document_opencv(img: &DynamicImage) -> Result<DynamicImage, String> {
         .map_err(|e| format!("灰度转换失败: {}", e))?;
     
     let mut denoised = Mat::default();
-    fast_nl_means_denoising(&gray, &mut denoised, 1.0, 7, 21)
-        .map_err(|e| format!("降噪失败: {}", e))?;
+    fast_nl_means_denoising(&gray, &mut denoised, 2.0, 7, 21)
+        .map_err(|e| format!("黑白降噪失败: {}", e))?;
     
-    let result_data = denoised.data_bytes()
-        .map_err(|e| format!("获取结果数据失败: {}", e))?;
+    let mut clahe = opencv::imgproc::create_clahe(3.0, opencv::core::Size::new(8, 8))
+        .map_err(|e| format!("创建黑白 CLAHE 失败: {}", e))?;
+    
+    let mut enhanced = Mat::default();
+    clahe.apply(&denoised, &mut enhanced)
+        .map_err(|e| format!("黑白 CLAHE 增强失败: {}", e))?;
+    
+    let mut binary = Mat::default();
+    threshold(&enhanced, &mut binary, 0.0, 255.0, THRESH_BINARY | THRESH_OTSU)
+        .map_err(|e| format!("二值化失败: {}", e))?;
+    
+    let mut result_gray = Mat::default();
+    opencv::core::add_weighted(
+        &enhanced,
+        0.7,
+        &binary,
+        0.3,
+        0.0,
+        &mut result_gray,
+        CV_8UC1
+    ).map_err(|e| format!("混合失败: {}", e))?;
+    
+    let sharpen_kernel = Mat::from_slice_2d(&[
+        [0.0f64, -1.0, 0.0],
+        [-1.0, 5.0, -1.0],
+        [0.0, -1.0, 0.0]
+    ]).map_err(|e| format!("创建锐化核失败: {}", e))?;
+    
+    let mut sharpened_gray = Mat::default();
+    opencv::imgproc::filter_2d(
+        &result_gray,
+        &mut sharpened_gray,
+        -1,
+        &sharpen_kernel,
+        opencv::core::Point::new(-1, -1),
+        0.0,
+        opencv::core::BORDER_DEFAULT
+    ).map_err(|e| format!("黑白锐化失败: {}", e))?;
+    
+    let result_data = sharpened_gray.data_bytes()
+        .map_err(|e| format!("获取黑白结果数据失败: {}", e))?;
     
     let mut result_img = ImageBuffer::new(width, height);
     for y in 0..height {
         for x in 0..width {
             let idx = (y * width + x) as usize;
-            let val = result_data[idx];
+            let val = result_data.get(idx).copied().unwrap_or(0);
             result_img.put_pixel(x, y, Luma([val]));
         }
     }
     
-    Ok(DynamicImage::ImageLuma8(result_img))
+    let final_img = if scale < 1.0 {
+        DynamicImage::ImageLuma8(result_img).resize_exact(orig_width, orig_height, image::imageops::FilterType::Triangle)
+    } else {
+        DynamicImage::ImageLuma8(result_img)
+    };
+    
+    Ok(final_img)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn enhance_document_opencv(img: &DynamicImage) -> Result<DynamicImage, String> {
-    Ok(img.clone())
+fn enhance_document_opencv(img: &DynamicImage, grayscale: bool) -> Result<DynamicImage, String> {
+    if grayscale {
+        Ok(img.grayscale())
+    } else {
+        Ok(img.clone())
+    }
 }
 
 // ==================== DBNet 文本检测 ====================

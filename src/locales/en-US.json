@@ -80,7 +80,11 @@
     "placeholder": "Please select an image source to start scanning",
     "apply": "Apply Enhancement",
     "save": "Save Result",
-    "clear": "Clear"
+    "clear": "Clear",
+    "capture": "Capture",
+    "scannedImages": "Scanned",
+    "noImages": "No images",
+    "grayscale": "Grayscale"
   },
   "settings": {
     "title": "Settings",

@@ -5,6 +5,9 @@ class RealtimeBatchDrawManager {
         this.drawRafId = null;
         this.highFrameRate = false;
         this.lastDrawTime = 0;
+        this.lastType = null;
+        this.lastColor = null;
+        this.lastLineWidth = null;
     }
 
     getCtx() {
@@ -56,16 +59,13 @@ class RealtimeBatchDrawManager {
             return;
         }
 
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
         const commands = this.pendingCommands;
         this.pendingCommands = [];
         this.lastDrawTime = performance.now();
 
-        let currentType = null;
-        let currentColor = null;
-        let currentLineWidth = null;
+        let currentType = this.lastType;
+        let currentColor = this.lastColor;
+        let currentLineWidth = this.lastLineWidth;
         let currentPath = null;
 
         const flushPath = () => {
@@ -104,6 +104,10 @@ class RealtimeBatchDrawManager {
         }
 
         flushPath();
+
+        this.lastType = currentType;
+        this.lastColor = currentColor;
+        this.lastLineWidth = currentLineWidth;
     }
 
     _resetState() {
@@ -112,11 +116,22 @@ class RealtimeBatchDrawManager {
             cancelAnimationFrame(this.drawRafId);
             this.drawRafId = null;
         }
+        this.lastType = null;
+        this.lastColor = null;
+        this.lastLineWidth = null;
     }
 
     startDrawing() {
         this.pendingCommands = [];
         this.lastDrawTime = performance.now();
+        
+        const ctx = this.getCtx();
+        if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
     }
 
     endDrawing() {

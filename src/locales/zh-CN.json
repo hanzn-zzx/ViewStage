@@ -80,7 +80,11 @@
     "placeholder": "请选择图像源开始扫描",
     "apply": "应用增强",
     "save": "保存结果",
-    "clear": "清空"
+    "clear": "清空",
+    "capture": "拍摄",
+    "scannedImages": "已扫描",
+    "noImages": "暂无图片",
+    "grayscale": "黑白模式"
   },
   "settings": {
     "title": "设置",

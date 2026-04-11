@@ -106,6 +106,8 @@ body {
     touch-action: none;
     border: none;
     outline: none;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
 }
 
 .canvas-wrapper {
@@ -114,6 +116,10 @@ body {
     left: 0;
     transform-origin: 0 0;
     background-color: #3a3a3a;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
 }
 
 .canvas-wrapper.dragging {
@@ -127,14 +133,12 @@ body {
 .canvas-image {
     z-index: 2;
     background-color: transparent;
-    image-rendering: pixelated;
 }
 
 .canvas-draw {
     z-index: 3;
     background-color: transparent;
     cursor: grab;
-    image-rendering: pixelated;
 }
 
 .camera-video {
@@ -143,7 +147,6 @@ body {
     display: none;
     pointer-events: none;
     object-fit: contain;
-    image-rendering: pixelated;
 }
 
 .canvas-draw.drawing {

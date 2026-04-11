@@ -466,7 +466,9 @@ let dom = {};  // DOM 元素引用缓存
 window.dom = dom;
 window.state = state;
 
-let cachedCanvasRect = null;  // 缓存的画布边界矩形
+let cachedCanvasRect = null;
+let cachedVisibleRect = null;
+let cachedVisibleRectKey = null;
 
 let offscreenCanvasPool = [];
 const MAX_OFFSCREEN_CANVAS = 2;
@@ -1524,31 +1526,36 @@ function clampCanvasPosition() {
     state.canvasY = Math.max(state.moveBound.minY - eps, Math.min(state.moveBound.maxY + eps, state.canvasY));
 }
 
-// 获取当前可见区域（Canvas 坐标系）
 function getVisibleRect() {
+    const key = `${state.scale}-${state.canvasX}-${state.canvasY}`;
+    if (cachedVisibleRectKey === key && cachedVisibleRect) {
+        return cachedVisibleRect;
+    }
+    
     const scale = state.scale || 1;
     const screenW = DRAW_CONFIG.screenW;
     const screenH = DRAW_CONFIG.screenH;
     
-    // 计算可见区域在 Canvas 坐标系中的位置
     let visibleX = Math.max(0, -state.canvasX / scale);
     let visibleY = Math.max(0, -state.canvasY / scale);
     let visibleW = Math.min(DRAW_CONFIG.canvasW - visibleX, screenW / scale);
     let visibleH = Math.min(DRAW_CONFIG.canvasH - visibleY, screenH / scale);
     
-    // 添加边距，避免边缘裁剪问题
     const padding = 10;
     visibleX = Math.max(0, visibleX - padding);
     visibleY = Math.max(0, visibleY - padding);
     visibleW = Math.min(DRAW_CONFIG.canvasW - visibleX, visibleW + padding * 2);
     visibleH = Math.min(DRAW_CONFIG.canvasH - visibleY, visibleH + padding * 2);
     
-    return {
+    cachedVisibleRect = {
         x: visibleX,
         y: visibleY,
         width: visibleW,
         height: visibleH
     };
+    cachedVisibleRectKey = key;
+    
+    return cachedVisibleRect;
 }
 
 // 检查笔画是否在可见区域内
@@ -1989,7 +1996,7 @@ function setSmoothingQuality(quality) {
 }
 
 function startDrawingMode() {
-    setSmoothingQuality('low');
+    setSmoothingQuality('high');
     dom.canvasWrapper.classList.add('drawing');
 }
 
@@ -2848,13 +2855,9 @@ function pointToSegmentDistance(px, py, x1, y1, x2, y2) {
 }
 
 async function redrawAllStrokes(dirtyRect = null) {
-    const startTime = performance.now();
     const ctx = dom.drawCtx;
     
-    // 获取可见区域，用于过滤不可见的笔画
     const visibleRect = getVisibleRect();
-    
-    console.log(`[重绘] 可见区域: (${visibleRect.x.toFixed(0)}, ${visibleRect.y.toFixed(0)}) ${visibleRect.width.toFixed(0)}x${visibleRect.height.toFixed(0)}, 缩放: ${state.scale.toFixed(2)}`);
     
     // 如果有脏区域，只清除和重绘该区域
     if (dirtyRect) {
@@ -2903,13 +2906,6 @@ async function redrawAllStrokes(dirtyRect = null) {
     // 进一步过滤：只保留可见区域内的笔画
     strokesToRedraw = strokesToRedraw.filter(stroke => isStrokeVisible(stroke, visibleRect));
     
-    const totalStrokes = state.strokeHistory.length;
-    const visibleStrokes = strokesToRedraw.length;
-    const savedPercent = totalStrokes > 0 ? ((1 - visibleStrokes / totalStrokes) * 100).toFixed(1) : 0;
-    
-    console.log(`[重绘] 笔画: ${visibleStrokes}/${totalStrokes} (节省 ${savedPercent}%)`);
-    
-    // 分离可变线宽笔画和固定线宽笔画
     const eraseStrokes = [];
     const variableWidthStrokes = [];
     const fixedWidthStrokes = new Map();
@@ -2938,14 +2934,14 @@ async function redrawAllStrokes(dirtyRect = null) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     
-    // 批量绘制橡皮擦笔画
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
+    
+    const erasePath = new Path2D();
     for (const stroke of eraseStrokes) {
         const eraserSize = stroke.eraserSize || DRAW_CONFIG.eraserSize;
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
         ctx.lineWidth = eraserSize;
         
-        const erasePath = new Path2D();
         if (stroke.points && stroke.points.length >= 1) {
             const firstPoint = stroke.points[0];
             if (firstPoint.x !== undefined) {
@@ -3035,9 +3031,6 @@ async function redrawAllStrokes(dirtyRect = null) {
     if (dirtyRect) {
         ctx.restore();
     }
-    
-    const endTime = performance.now();
-    console.log(`[重绘] 完成，耗时: ${(endTime - startTime).toFixed(2)}ms`);
 }
 
 async function drawEraserStroke(stroke) {
