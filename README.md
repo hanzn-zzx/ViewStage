@@ -11,25 +11,42 @@
 - **构建工具**：Cargo
 
 > \[!IMPORTANT]
-> 这个应用部分使用了Tare编写与进行性能优化、检测代码问题
+> 这个应用部分使用了Trae编写与进行性能优化、检测代码问题
 >
 > > 若您介意或排斥，请无视次项目，感谢(❁´◡\`❁)
 
 ## 功能特点
 
-- 🚀 **轻量高性能**：基于 Tauri 框架，应用体积小、启动快、内存占用低
-- 🎨 **原生 UI 体验**：使用系统原生 WebView，提供流畅的桌面应用交互
-- 📦 **开箱即用**：无复杂前端框架依赖，代码结构清晰易维护
-- 🔧 **高度可配置**：支持自定义配置，包括但不限于摄像头选择、PDF文件关联等
-- 🌈 **多颜色笔**：提供15种颜色的笔，可在设置中自定义添加或删除
-- 🖊 **大小无极调节**：支持批注大小1-20px无级调节，橡皮1-50px无级调节
-- 🔍 **实时预览**：在设置中可以开启实时预览，方便查看摄像头画面
-- 📁 **多文档格式支持**：支持打开.pdf/.docx/.doc/等格式的文档 \[若需要打开Word文档，系统中必须安装有Microsoft Office或WPS Office]
+### 核心功能
+- � **摄像头展台**：实时采集摄像头画面，支持拍照保存
+- 📄 **文档展示**：支持 PDF、Word 文档打开与展示
+- 🖊 **批注功能**：在画面上自由绘制批注，支持撤销与清空
+
+### 画笔工具
+- 🎨 **多色画笔**：15种预设颜色，支持自定义增删
+- � **无级调节**：画笔 1-20px，橡皮擦 1-50px
+
+### 其他特性
+- 🚀 **轻量高效**：基于 Tauri，体积小、启动快
+- � **高度可配置**：摄像头选择、文件关联等设置
+- 🌐 **多语言支持**：简体中文、繁体中文、English
 
 ## 运行条件
 
-- 推荐操作系统：Windows10以上系统
-- 1、在系统中必须安装有WebView2运行时，若未安装，请前往[Microsoft Edge WebView2 运行时](https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section)下载并安装最新版
+### 系统要求
+
+- **操作系统**：Windows 10 或更高版本
+- **运行时**：WebView2 运行时（[下载地址](https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section)）
+
+### 硬件要求
+
+- **摄像头**：支持视频采集的摄像头设备（用于展台功能）
+- **内存**：建议 4GB 以上
+- **存储**：约 50MB 可用空间
+
+### 可选依赖
+
+- **Microsoft Office** 或 **WPS Office**：用于打开 Word 文档（.doc/.docx）
 
 ## 开发环境要求
 
@@ -37,22 +54,39 @@
 - Rust（稳定版）
 - Tauri CLI
 
-## 项目进展
-
-- ✅批注
-- ✅触控
-- ✅PDF、Word打开
-- ✅允许PDF/.docx/.doc格式的文档以ViewStage为默认打开程序
-- ✅允许从外部导入图片
-- ✅图标完善（
-- ✅设置
-- ✅笔颜色（目前支持存储15中颜色）
-- ✅多语言
-- ❎支持手机作为信号源
-- ❎支持手机上传图片及文件
-- ⛏️OCR文档增强（目前仍然有小问题未解决）
-- ❓更多功能(欢迎到issues提交(*^\_^*))
-
-## 许可证
+## **许可证**
 
 本项目采用开源许可证，详见 [LICENSE](https://github.com/ospneam/ViewStage/blob/main/LICENSE) 文件。
+
+## 致谢
+
+本项目使用了以下开源项目，感谢这些项目的开发者们：
+
+### 核心框架
+
+- [Tauri](https://tauri.app/) - 构建更小、更快、更安全的桌面应用框架
+- [Tokio](https://tokio.rs/) - Rust异步运行时
+
+### 前端库
+
+- [PDF.js](https://mozilla.github.io/pdf.js/) - Mozilla开发的PDF渲染库，用于在浏览器中显示PDF文档
+- [mammoth.js](https://github.com/mwilliamson/mammoth.js) - 将Word文档(.docx)转换为HTML的库
+- [html2canvas](https://html2canvas.hertzen.com/) - 将HTML元素渲染为Canvas的库
+
+### Rust库
+
+- [image](https://github.com/image-rs/image) - Rust图像处理库
+- [imageproc](https://github.com/image-rs/imageproc) - Rust图像处理算法库
+- [serde](https://serde.rs/) - Rust序列化框架
+- [rayon](https://github.com/rayon-rs/rayon) - Rust数据并行库
+- [chrono](https://github.com/chronotope/chrono) - Rust日期时间库
+- [ort](https://github.com/pykeio/ort) - ONNX Runtime的Rust绑定，用于AI模型推理
+
+### Tauri插件
+
+- [tauri-plugin-opener](https://github.com/tauri-apps/plugins-workspace) - 文件打开插件
+- [tauri-plugin-fs](https://github.com/tauri-apps/plugins-workspace) - 文件系统插件
+- [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) - 对话框插件
+- [tauri-plugin-single-instance](https://github.com/tauri-apps/plugins-workspace) - 单实例控制插件
+
+感谢所有开源社区的贡献者们！
