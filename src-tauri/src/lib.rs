@@ -1,11 +1,10 @@
 //! ViewStage - 图像处理 Rust 后端
 //! 
 //! 功能模块：
-//! - 图像旋转 (rotate_image): 90/180/270度旋转
-//! - 图片保存 (save_image, save_images_batch): 保存到指定目录
-//! - 笔画压缩 (compact_strokes): 将笔画渲染到图片
+//! - 图像旋转 (image_update_rotation): 90/180/270度旋转
+//! - 图片保存 (image_save_file): 保存到指定目录
+//! - 笔画压缩 (stroke_format_compact): 将笔画渲染到图片
 //! - 设置管理 (get_settings, save_settings): 应用配置持久化
-//! - 摄像头管理 (get_camera_list, set_camera_state): 设备枚举与状态
 //!
 //! 性能优化：
 //! - 使用 rayon 并行处理像素
@@ -19,8 +18,8 @@ use base64::{Engine as _, engine::general_purpose};
 mod image_processing;
 
 use image_processing::{
-    decode_base64_image, extract_base64,
-    rotate_image,
+    image_load_base64, image_fetch_base64_data,
+    image_update_rotation,
 };
 
 #[cfg(target_os = "windows")]
@@ -50,7 +49,7 @@ static DBNET_ORT_MODEL_PATH: once_cell::sync::Lazy<Mutex<Option<PathBuf>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
 /// 获取或加载 DexiNed 模型
-fn get_or_load_dexined_model(model_path: &std::path::Path) -> Result<Arc<Mutex<ort::session::Session>>, String> {
+fn model_load_dexined(model_path: &std::path::Path) -> Result<Arc<Mutex<ort::session::Session>>, String> {
     {
         let cached_path = DEXINED_MODEL_PATH.lock().unwrap();
         if let Some(ref path) = *cached_path {
@@ -92,7 +91,7 @@ fn get_or_load_dexined_model(model_path: &std::path::Path) -> Result<Arc<Mutex<o
 }
 
 /// 获取或加载 DBNet (ONNX Runtime) 模型
-fn get_or_load_dbnet_ort_model(model_path: &std::path::Path) -> Result<Arc<Mutex<ort::session::Session>>, String> {
+fn model_load_dbnet_ort(model_path: &std::path::Path) -> Result<Arc<Mutex<ort::session::Session>>, String> {
     {
         let cached_path = DBNET_ORT_MODEL_PATH.lock().unwrap();
         if let Some(ref path) = *cached_path {
@@ -177,7 +176,7 @@ pub struct CompactStrokesRequest {
 
 /// 获取应用缓存目录
 #[tauri::command]
-fn get_cache_dir(app: tauri::AppHandle) -> Result<String, String> {
+fn dir_fetch_cache(app: tauri::AppHandle) -> Result<String, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     
@@ -193,7 +192,7 @@ fn get_cache_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 /// 获取缓存大小
 #[tauri::command]
-fn get_cache_size(app: tauri::AppHandle) -> Result<u64, String> {
+fn cache_fetch_size(app: tauri::AppHandle) -> Result<u64, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     
@@ -203,14 +202,14 @@ fn get_cache_size(app: tauri::AppHandle) -> Result<u64, String> {
         return Ok(0);
     }
     
-    fn dir_size(path: &std::path::Path) -> u64 {
+    fn directory_calc_size(path: &std::path::Path) -> u64 {
         let mut size = 0;
         if path.is_dir() {
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        size += dir_size(&path);
+                        size += directory_calc_size(&path);
                     } else {
                         size += entry.metadata().map(|m| m.len()).unwrap_or(0);
                     }
@@ -220,12 +219,12 @@ fn get_cache_size(app: tauri::AppHandle) -> Result<u64, String> {
         size
     }
     
-    Ok(dir_size(&cache_dir))
+    Ok(directory_calc_size(&cache_dir))
 }
 
 /// 清除缓存
 #[tauri::command]
-fn clear_cache(app: tauri::AppHandle) -> Result<String, String> {
+fn cache_delete_all(app: tauri::AppHandle) -> Result<String, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     
@@ -235,7 +234,7 @@ fn clear_cache(app: tauri::AppHandle) -> Result<String, String> {
         return Ok("缓存目录不存在".to_string());
     }
     
-    fn remove_dir_contents(path: &std::path::Path) -> (u64, u32) {
+    fn directory_delete_contents(path: &std::path::Path) -> (u64, u32) {
         let mut size = 0u64;
         let mut count = 0u32;
         
@@ -243,7 +242,7 @@ fn clear_cache(app: tauri::AppHandle) -> Result<String, String> {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 if entry_path.is_dir() {
-                    let (s, c) = remove_dir_contents(&entry_path);
+                    let (s, c) = directory_delete_contents(&entry_path);
                     size += s;
                     count += c;
                     let _ = std::fs::remove_dir(&entry_path);
@@ -258,7 +257,7 @@ fn clear_cache(app: tauri::AppHandle) -> Result<String, String> {
         (size, count)
     }
     
-    let (cleared_size, cleared_files) = remove_dir_contents(&cache_dir);
+    let (cleared_size, cleared_files) = directory_delete_contents(&cache_dir);
     
     log::info!("清除缓存: {} 字节, {} 个文件", cleared_size, cleared_files);
     
@@ -267,7 +266,7 @@ fn clear_cache(app: tauri::AppHandle) -> Result<String, String> {
 
 /// 检查并执行自动清除缓存
 #[tauri::command]
-fn check_auto_clear_cache(app: tauri::AppHandle) -> Result<bool, String> {
+fn cache_validate_auto_clear(app: tauri::AppHandle) -> Result<bool, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     
@@ -326,12 +325,12 @@ fn check_auto_clear_cache(app: tauri::AppHandle) -> Result<bool, String> {
         let cache_dir = config_dir.join("cache");
         
         if cache_dir.exists() {
-            fn remove_dir_contents(path: &std::path::Path) {
+            fn directory_delete_contents(path: &std::path::Path) {
                 if let Ok(entries) = std::fs::read_dir(path) {
                     for entry in entries.flatten() {
                         let entry_path = entry.path();
                         if entry_path.is_dir() {
-                            remove_dir_contents(&entry_path);
+                            directory_delete_contents(&entry_path);
                             let _ = std::fs::remove_dir(&entry_path);
                         } else {
                             let _ = std::fs::remove_file(&entry_path);
@@ -339,7 +338,7 @@ fn check_auto_clear_cache(app: tauri::AppHandle) -> Result<bool, String> {
                     }
                 }
             }
-            remove_dir_contents(&cache_dir);
+            directory_delete_contents(&cache_dir);
         }
         
         let mut updated_config = config.clone();
@@ -358,7 +357,7 @@ fn check_auto_clear_cache(app: tauri::AppHandle) -> Result<bool, String> {
 
 /// 获取应用配置目录
 #[tauri::command]
-fn get_config_dir(app: tauri::AppHandle) -> Result<String, String> {
+fn dir_fetch_config(app: tauri::AppHandle) -> Result<String, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     
@@ -372,7 +371,7 @@ fn get_config_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 /// 获取图片保存目录 (~/Pictures/ViewStage)
 #[tauri::command]
-fn get_cds_dir() -> Result<String, String> {
+fn dir_fetch_pictures_viewstage() -> Result<String, String> {
     let pictures_dir = dirs::picture_dir()
         .ok_or("Failed to get pictures directory")?;
     
@@ -388,7 +387,7 @@ fn get_cds_dir() -> Result<String, String> {
 
 /// 获取用户主题目录 (%APPDATA%/SECTL/ViewStage/themes)
 #[tauri::command]
-fn get_theme_dir(app: tauri::AppHandle) -> Result<String, String> {
+fn dir_fetch_theme(app: tauri::AppHandle) -> Result<String, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     
@@ -403,7 +402,7 @@ fn get_theme_dir(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// 获取模型文件目录 (%APPDATA%/SECTL/ViewStage/models)
-fn get_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+fn dir_fetch_models(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("获取配置目录失败: {}", e))?;
     
@@ -422,7 +421,7 @@ fn get_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> 
 /// 生成保存路径
 /// - 按日期创建子目录: YYYY-MM-DD
 /// - 文件名格式: {prefix}_HH-MM-SS-SSS.{extension}
-fn get_save_path(base_dir: &str, prefix: &str, extension: &str) -> Result<(PathBuf, String), String> {
+fn path_calc_save(base_dir: &str, prefix: &str, extension: &str) -> Result<(PathBuf, String), String> {
     use std::time::{SystemTime, UNIX_EPOCH};
     
     let now = chrono::Local::now();
@@ -447,7 +446,7 @@ fn get_save_path(base_dir: &str, prefix: &str, extension: &str) -> Result<(PathB
     Ok((file_path, file_name))
 }
 
-fn sanitize_prefix(prefix: &str) -> String {
+fn string_format_prefix(prefix: &str) -> String {
     let sanitized: String = prefix
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
@@ -456,12 +455,12 @@ fn sanitize_prefix(prefix: &str) -> String {
 }
 
 #[tauri::command]
-fn save_image(image_data: String, prefix: Option<String>) -> Result<ImageSaveResult, String> {
-    let base_dir = get_cds_dir()?;
-    let prefix_str = sanitize_prefix(&prefix.unwrap_or_else(|| "photo".to_string()));
-    
-    let decoded = extract_base64(&image_data)?;
-    
+fn image_save_file(image_data: String, prefix: Option<String>) -> Result<ImageSaveResult, String> {
+    let base_dir = dir_fetch_pictures_viewstage()?;
+    let prefix_str = string_format_prefix(&prefix.unwrap_or_else(|| "photo".to_string()));
+
+    let decoded = image_fetch_base64_data(&image_data)?;
+
     let extension = if image_data.contains("image/png") {
         "png"
     } else if image_data.contains("image/jpeg") || image_data.contains("image/jpg") {
@@ -469,8 +468,8 @@ fn save_image(image_data: String, prefix: Option<String>) -> Result<ImageSaveRes
     } else {
         "png"
     };
-    
-    let (file_path, _file_name) = get_save_path(&base_dir, &prefix_str, extension)?;
+
+    let (file_path, _file_name) = path_calc_save(&base_dir, &prefix_str, extension)?;
     
     std::fs::write(&file_path, &decoded)
         .map_err(|e| format!("Failed to write image file: {}", e))?;
@@ -488,7 +487,7 @@ fn save_image(image_data: String, prefix: Option<String>) -> Result<ImageSaveRes
 
 /// 解析颜色字符串为 RGBA
 /// 支持格式: #RRGGBB 或 #RRGGBBAA
-fn parse_color(color_str: &str) -> Result<Rgba<u8>, String> {
+fn color_calc_from_hex(color_str: &str) -> Result<Rgba<u8>, String> {
     if !color_str.starts_with('#') {
         return Err(format!("Invalid color format: must start with '#', got: {}", color_str));
     }
@@ -520,7 +519,7 @@ fn parse_color(color_str: &str) -> Result<Rgba<u8>, String> {
 
 const DEFAULT_COLOR: Rgba<u8> = Rgba([52, 152, 219, 255]);
 
-fn draw_line_on_canvas(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, color: Rgba<u8>, width: u32) {
+fn canvas_render_line(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, color: Rgba<u8>, width: u32) {
     let dx = (x2 - x1).abs();
     let dy = (y2 - y1).abs();
     let sx = if x1 < x2 { 1 } else { -1 };
@@ -570,7 +569,7 @@ fn draw_line_on_canvas(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i3
     }
 }
 
-fn erase_line_on_canvas(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, width: u32) {
+fn canvas_delete_line(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, width: u32) {
     let dx = (x2 - x1).abs();
     let dy = (y2 - y1).abs();
     let sx = if x1 < x2 { 1 } else { -1 };
@@ -613,7 +612,7 @@ fn erase_line_on_canvas(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i
 }
 
 #[tauri::command]
-fn compact_strokes(request: CompactStrokesRequest) -> Result<String, String> {
+fn stroke_format_compact(request: CompactStrokesRequest) -> Result<String, String> {
     let mut canvas: RgbaImage = ImageBuffer::new(request.canvas_width, request.canvas_height);
     
     for pixel in canvas.pixels_mut() {
@@ -621,7 +620,7 @@ fn compact_strokes(request: CompactStrokesRequest) -> Result<String, String> {
     }
     
     if let Some(base_image_data) = request.base_image {
-        if let Ok(base_img) = decode_base64_image(&base_image_data) {
+        if let Ok(base_img) = image_load_base64(&base_image_data) {
             let base_rgba = base_img.to_rgba8();
             for (x, y, pixel) in base_rgba.enumerate_pixels() {
                 if x < canvas.width() && y < canvas.height() {
@@ -646,12 +645,12 @@ fn compact_strokes(request: CompactStrokesRequest) -> Result<String, String> {
         }
         
         if stroke.stroke_type == "draw" {
-            let color = parse_color(stroke.color.as_deref().unwrap_or("#3498db"))
+            let color = color_calc_from_hex(stroke.color.as_deref().unwrap_or("#3498db"))
                 .unwrap_or(DEFAULT_COLOR);
             let line_width = stroke.line_width.unwrap_or(2);
             
             for point in points {
-                draw_line_on_canvas(
+                canvas_render_line(
                     &mut canvas,
                     point.from_x as i32,
                     point.from_y as i32,
@@ -665,7 +664,7 @@ fn compact_strokes(request: CompactStrokesRequest) -> Result<String, String> {
             let eraser_size = stroke.eraser_size.unwrap_or(15);
             
             for point in points {
-                erase_line_on_canvas(
+                canvas_delete_line(
                     &mut canvas,
                     point.from_x as i32,
                     point.from_y as i32,
@@ -692,12 +691,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static MIRROR_STATE: AtomicBool = AtomicBool::new(false);
 static OOBE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static MAIN_SCRIPT_LOADED: AtomicBool = AtomicBool::new(false);
 
 // ==================== 设置窗口 ====================
 // 打开设置窗口、状态同步
 
 #[tauri::command]
-async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
+async fn window_show_settings(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
     
     if let Some(window) = app.get_webview_window("settings") {
@@ -725,19 +725,19 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn set_mirror_state(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+async fn mirror_update_state(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
     MIRROR_STATE.store(enabled, Ordering::SeqCst);
     let _ = app.emit("mirror-changed", enabled);
     Ok(())
 }
 
 #[tauri::command]
-async fn get_mirror_state() -> Result<bool, String> {
+async fn mirror_fetch_state() -> Result<bool, String> {
     Ok(MIRROR_STATE.load(Ordering::SeqCst))
 }
 
 #[tauri::command]
-fn get_app_version() -> String {
+fn app_fetch_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
@@ -766,7 +766,7 @@ struct UpdateCheckResult {
     current_release: Option<GitHubRelease>,
 }
 
-fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
+fn version_calc_parse(version: &str) -> Option<(u32, u32, u32)> {
     let version = version.trim_start_matches('v');
     let parts: Vec<&str> = version.split('.').collect();
     
@@ -779,9 +779,9 @@ fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
     None
 }
 
-fn is_newer_version(current: &str, latest: &str) -> bool {
-    let current_ver = parse_version(current);
-    let latest_ver = parse_version(latest);
+fn version_validate_newer(current: &str, latest: &str) -> bool {
+    let current_ver = version_calc_parse(current);
+    let latest_ver = version_calc_parse(latest);
     
     match (current_ver, latest_ver) {
         (Some(c), Some(l)) => l > c,
@@ -789,7 +789,7 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
     }
 }
 
-fn validate_github_url(url: &str) -> Result<(), String> {
+fn url_validate_github(url: &str) -> Result<(), String> {
     if url.starts_with("https://gh-proxy.com/") {
         let original_url = url.strip_prefix("https://gh-proxy.com/").unwrap_or(url);
         let parsed = url::Url::parse(original_url).map_err(|e| format!("Invalid URL: {}", e))?;
@@ -814,7 +814,7 @@ fn validate_github_url(url: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn check_update() -> Result<UpdateCheckResult, String> {
+async fn update_fetch_check() -> Result<UpdateCheckResult, String> {
     let current_version = env!("CARGO_PKG_VERSION");
     
     let client = reqwest::Client::builder()
@@ -843,10 +843,10 @@ async fn check_update() -> Result<UpdateCheckResult, String> {
         return Err("Invalid release: empty tag name".to_string());
     }
     
-    validate_github_url(&release.html_url)?;
+    url_validate_github(&release.html_url)?;
     
     let latest_version = release.tag_name.trim_start_matches('v');
-    let has_update = is_newer_version(current_version, latest_version);
+    let has_update = version_validate_newer(current_version, latest_version);
     
     let current_tag = format!("v{}", current_version);
     let current_release_response = client
@@ -878,15 +878,15 @@ const CURRENT_CONFIG_VERSION: u32 = 1;
 
 type MigrationFn = fn(&mut serde_json::Value) -> Result<(), String>;
 
-fn get_migrations() -> std::collections::HashMap<u32, MigrationFn> {
+fn migration_fetch_all() -> std::collections::HashMap<u32, MigrationFn> {
     let mut migrations: std::collections::HashMap<u32, MigrationFn> = std::collections::HashMap::new();
     
-    migrations.insert(0u32, migrate_v0_to_v1 as MigrationFn);
+    migrations.insert(0u32, migration_v0_to_v1 as MigrationFn);
     
     migrations
 }
 
-fn migrate_v0_to_v1(config: &mut serde_json::Value) -> Result<(), String> {
+fn migration_v0_to_v1(config: &mut serde_json::Value) -> Result<(), String> {
     log::info!("执行配置迁移: v0 -> v1");
     
     if let Some(obj) = config.as_object_mut() {
@@ -932,7 +932,7 @@ fn migrate_v0_to_v1(config: &mut serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
-fn backup_config(config_path: &std::path::Path, version: u32) -> Result<std::path::PathBuf, String> {
+fn config_backup_create(config_path: &std::path::Path, version: u32) -> Result<std::path::PathBuf, String> {
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let backup_filename = format!("config.json.backup_v{}_{}", version, timestamp);
     let backup_path = config_path.parent().unwrap().join(backup_filename);
@@ -944,7 +944,7 @@ fn backup_config(config_path: &std::path::Path, version: u32) -> Result<std::pat
     Ok(backup_path)
 }
 
-fn cleanup_old_backups(config_dir: &std::path::Path, keep_count: usize) {
+fn config_backup_cleanup_old(config_dir: &std::path::Path, keep_count: usize) {
     if let Ok(entries) = std::fs::read_dir(config_dir) {
         let mut backups: Vec<std::path::PathBuf> = entries
             .filter_map(|e| e.ok())
@@ -971,7 +971,7 @@ fn cleanup_old_backups(config_dir: &std::path::Path, keep_count: usize) {
     }
 }
 
-fn migrate_config(config: &mut serde_json::Value, migrations: &std::collections::HashMap<u32, MigrationFn>) -> Result<(), String> {
+fn config_migrate_run(config: &mut serde_json::Value, migrations: &std::collections::HashMap<u32, MigrationFn>) -> Result<(), String> {
     let current_version = config
         .get("config_version")
         .and_then(|v| v.as_u64())
@@ -996,7 +996,7 @@ fn migrate_config(config: &mut serde_json::Value, migrations: &std::collections:
     Ok(())
 }
 
-fn get_default_config() -> serde_json::Value {
+fn config_fetch_default() -> serde_json::Value {
     serde_json::json!({
         "config_version": CURRENT_CONFIG_VERSION,
         "width": 1920,
@@ -1049,7 +1049,7 @@ fn get_default_config() -> serde_json::Value {
     })
 }
 
-fn merge_with_defaults(existing: &serde_json::Value, defaults: &serde_json::Value) -> serde_json::Value {
+fn config_merge_defaults(existing: &serde_json::Value, defaults: &serde_json::Value) -> serde_json::Value {
     let mut merged = defaults.clone();
     
     if let (Some(existing_obj), Some(merged_obj)) = (existing.as_object(), merged.as_object_mut()) {
@@ -1062,11 +1062,11 @@ fn merge_with_defaults(existing: &serde_json::Value, defaults: &serde_json::Valu
 }
 
 #[tauri::command]
-async fn get_settings(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+async fn settings_fetch_all(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let config_path = config_dir.join("config.json");
     
-    let default_config = get_default_config();
+    let default_config = config_fetch_default();
     
     if !config_path.exists() {
         log::info!("配置文件不存在，使用默认配置");
@@ -1087,13 +1087,13 @@ async fn get_settings(app: tauri::AppHandle) -> Result<serde_json::Value, String
     if current_version < CURRENT_CONFIG_VERSION {
         log::info!("检测到配置版本过旧: v{} < v{}", current_version, CURRENT_CONFIG_VERSION);
         
-        let backup_path = backup_config(&config_path, current_version)?;
+        let backup_path = config_backup_create(&config_path, current_version)?;
         
-        let migrations = get_migrations();
+        let migrations = migration_fetch_all();
         
-        match migrate_config(&mut existing_config, &migrations) {
+        match config_migrate_run(&mut existing_config, &migrations) {
             Ok(_) => {
-                let merged_config = merge_with_defaults(&existing_config, &default_config);
+                let merged_config = config_merge_defaults(&existing_config, &default_config);
                 
                 let merged_str = serde_json::to_string_pretty(&merged_config)
                     .map_err(|e| format!("序列化配置失败: {}", e))?;
@@ -1107,7 +1107,7 @@ async fn get_settings(app: tauri::AppHandle) -> Result<serde_json::Value, String
                         format!("保存配置失败: {}", e)
                     })?;
                 
-                cleanup_old_backups(&config_dir, 3);
+                config_backup_cleanup_old(&config_dir, 3);
                 
                 log::info!("配置迁移成功");
                 Ok(merged_config)
@@ -1121,12 +1121,12 @@ async fn get_settings(app: tauri::AppHandle) -> Result<serde_json::Value, String
                 }
                 
                 log::info!("已回滚到迁移前的配置");
-                let merged_config = merge_with_defaults(&existing_config, &default_config);
+                let merged_config = config_merge_defaults(&existing_config, &default_config);
                 Ok(merged_config)
             }
         }
     } else {
-        let merged_config = merge_with_defaults(&existing_config, &default_config);
+        let merged_config = config_merge_defaults(&existing_config, &default_config);
         
         let merged_str = serde_json::to_string_pretty(&merged_config)
             .map_err(|e| format!("序列化配置失败: {}", e))?;
@@ -1138,7 +1138,7 @@ async fn get_settings(app: tauri::AppHandle) -> Result<serde_json::Value, String
 }
 
 #[tauri::command]
-async fn save_settings(app: tauri::AppHandle, settings: serde_json::Value) -> Result<(), String> {
+async fn settings_save_all(app: tauri::AppHandle, settings: serde_json::Value) -> Result<(), String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     
     if !config_dir.exists() {
@@ -1181,7 +1181,7 @@ async fn save_settings(app: tauri::AppHandle, settings: serde_json::Value) -> Re
 }
 
 #[tauri::command]
-async fn open_doc_scan_window(app: tauri::AppHandle) -> Result<(), String> {
+async fn window_show_doc_scan(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
     
     if let Some(window) = app.get_webview_window("doc-scan") {
@@ -1208,7 +1208,7 @@ async fn open_doc_scan_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn check_pdf_default_app() -> Result<bool, String> {
+async fn filetype_validate_pdf_default() -> Result<bool, String> {
     use winreg::RegKey;
     use winreg::enums::*;
     
@@ -1239,16 +1239,16 @@ async fn check_pdf_default_app() -> Result<bool, String> {
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-async fn check_pdf_default_app() -> Result<bool, String> {
+async fn filetype_validate_pdf_default() -> Result<bool, String> {
     Ok(false)
 }
 
-fn restart_application(app: &tauri::AppHandle) {
+fn app_restart(app: &tauri::AppHandle) {
     app.restart();
 }
 
 #[tauri::command]
-async fn reset_settings(app: tauri::AppHandle) -> Result<(), String> {
+async fn settings_delete_all(app: tauri::AppHandle) -> Result<(), String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     
     if config_dir.exists() {
@@ -1259,14 +1259,14 @@ async fn reset_settings(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
     
-    restart_application(&app);
+    app_restart(&app);
     
     Ok(())
 }
 
 #[tauri::command]
-async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
-    restart_application(&app);
+async fn app_restart_process(app: tauri::AppHandle) -> Result<(), String> {
+    app_restart(&app);
     
     Ok(())
 }
@@ -1274,7 +1274,7 @@ async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
 use std::io::Write;
 
 #[tauri::command]
-async fn download_update(
+async fn update_download_file(
     app: tauri::AppHandle,
     url: String,
     file_name: String,
@@ -1283,7 +1283,7 @@ async fn download_update(
     let use_mirror = use_mirror.unwrap_or(false);
     log::info!("开始下载更新，文件: {}, 镜像: {}", file_name, use_mirror);
 
-    validate_github_url(&url)?;
+    url_validate_github(&url)?;
 
     let download_url = if use_mirror {
         let proxy_url = format!("https://gh-proxy.com/{}", url);
@@ -1386,7 +1386,7 @@ async fn download_update(
 }
 
 #[tauri::command]
-async fn get_available_resolutions(app: tauri::AppHandle) -> Result<Vec<(u32, u32, String)>, String> {
+async fn resolution_fetch_available(app: tauri::AppHandle) -> Result<Vec<(u32, u32, String)>, String> {
     let primary_monitor = app.primary_monitor()
         .map_err(|e| e.to_string())?
         .ok_or("无法获取主显示器".to_string())?;
@@ -1416,7 +1416,7 @@ async fn get_available_resolutions(app: tauri::AppHandle) -> Result<Vec<(u32, u3
 }
 
 #[tauri::command]
-async fn close_splashscreen(app: tauri::AppHandle) -> Result<(), String> {
+async fn window_hide_splashscreen(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(splashscreen) = app.get_webview_window("splashscreen") {
         let _ = splashscreen.close();
     }
@@ -1428,21 +1428,31 @@ async fn close_splashscreen(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn complete_oobe(app: tauri::AppHandle) -> Result<(), String> {
+async fn oobe_submit_complete(app: tauri::AppHandle) -> Result<(), String> {
     OOBE_ACTIVE.store(false, Ordering::SeqCst);
     
-    restart_application(&app);
+    app_restart(&app);
     
     Ok(())
 }
 
 #[tauri::command]
-fn is_oobe_active() -> bool {
+fn oobe_check_active() -> bool {
     OOBE_ACTIVE.load(Ordering::SeqCst)
 }
 
 #[tauri::command]
-fn exit_app() {
+fn main_signal_loaded() {
+    MAIN_SCRIPT_LOADED.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn main_check_loaded() -> bool {
+    MAIN_SCRIPT_LOADED.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn app_submit_exit() {
     std::process::exit(0);
 }
 
@@ -1467,16 +1477,16 @@ pub struct OfficeDetectionResult {
 }
 
 #[cfg(target_os = "windows")]
-fn detect_office_windows() -> OfficeDetectionResult {
+fn office_detect_windows() -> OfficeDetectionResult {
     use winreg::RegKey;
     use winreg::enums::*;
     
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     
-    let has_word = check_word_installed(&hkcu, &hklm);
-    let has_wps = check_wps_installed(&hkcu, &hklm);
-    let has_libreoffice = check_libreoffice_installed(&hkcu, &hklm);
+    let has_word = office_check_word(&hkcu, &hklm);
+    let has_wps = office_check_wps(&hkcu, &hklm);
+    let has_libreoffice = office_check_libreoffice(&hkcu, &hklm);
     
     let recommended = if has_word {
         OfficeSoftware::MicrosoftWord
@@ -1497,7 +1507,7 @@ fn detect_office_windows() -> OfficeDetectionResult {
 }
 
 #[cfg(target_os = "windows")]
-fn check_word_installed(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
+fn office_check_word(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
     let paths = [
         "SOFTWARE\\Microsoft\\Office\\Word",
         "SOFTWARE\\Microsoft\\Office\\16.0\\Word",
@@ -1515,7 +1525,7 @@ fn check_word_installed(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn check_wps_installed(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
+fn office_check_wps(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
     let paths = [
         "SOFTWARE\\Kingsoft\\Office",
         "SOFTWARE\\WPS",
@@ -1531,7 +1541,7 @@ fn check_wps_installed(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn check_libreoffice_installed(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
+fn office_check_libreoffice(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> bool {
     let paths = [
         "SOFTWARE\\LibreOffice",
         "SOFTWARE\\The Document Foundation\\LibreOffice",
@@ -1546,7 +1556,7 @@ fn check_libreoffice_installed(hkcu: &winreg::RegKey, hklm: &winreg::RegKey) -> 
 }
 
 #[cfg(not(target_os = "windows"))]
-fn detect_office_windows() -> OfficeDetectionResult {
+fn office_detect_windows() -> OfficeDetectionResult {
     OfficeDetectionResult {
         has_word: false,
         has_wps: false,
@@ -1556,13 +1566,13 @@ fn detect_office_windows() -> OfficeDetectionResult {
 }
 
 #[tauri::command]
-fn detect_office() -> OfficeDetectionResult {
-    detect_office_windows()
+fn office_detect_all() -> OfficeDetectionResult {
+    office_detect_windows()
 }
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn convert_docx_to_pdf_from_bytes(file_data: Vec<u8>, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
+async fn office_convert_docx_to_pdf_bytes(file_data: Vec<u8>, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
     use std::fs;
     use std::io::Write;
     
@@ -1584,7 +1594,7 @@ async fn convert_docx_to_pdf_from_bytes(file_data: Vec<u8>, file_name: String, a
         println!("未知文件格式");
     }
     
-    let detection = detect_office_windows();
+    let detection = office_detect_windows();
     println!("推荐使用: {:?}", detection.recommended);
     
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -1622,31 +1632,31 @@ async fn convert_docx_to_pdf_from_bytes(file_data: Vec<u8>, file_name: String, a
     
     let result = match detection.recommended {
         OfficeSoftware::MicrosoftWord => {
-            let r = convert_with_word_com(&docx_path_str, &pdf_path_str);
+            let r = office_convert_word(&docx_path_str, &pdf_path_str);
             if r.is_err() && detection.has_wps {
                 println!("Word 转换失败，尝试 WPS...");
-                convert_with_wps_com(&docx_path_str, &pdf_path_str)
+                office_convert_wps(&docx_path_str, &pdf_path_str)
             } else if r.is_err() && detection.has_libreoffice {
                 println!("Word 转换失败，尝试 LibreOffice...");
-                convert_with_libreoffice(&docx_path_str, &pdf_path_str, &doc_cache_dir)
+                office_convert_libreoffice(&docx_path_str, &pdf_path_str, &doc_cache_dir)
             } else {
                 r
             }
         }
         OfficeSoftware::WpsOffice => {
-            let r = convert_with_wps_com(&docx_path_str, &pdf_path_str);
+            let r = office_convert_wps(&docx_path_str, &pdf_path_str);
             if r.is_err() && detection.has_word {
                 println!("WPS 转换失败，尝试 Word...");
-                convert_with_word_com(&docx_path_str, &pdf_path_str)
+                office_convert_word(&docx_path_str, &pdf_path_str)
             } else if r.is_err() && detection.has_libreoffice {
                 println!("WPS 转换失败，尝试 LibreOffice...");
-                convert_with_libreoffice(&docx_path_str, &pdf_path_str, &doc_cache_dir)
+                office_convert_libreoffice(&docx_path_str, &pdf_path_str, &doc_cache_dir)
             } else {
                 r
             }
         }
         OfficeSoftware::LibreOffice => {
-            convert_with_libreoffice(&docx_path_str, &pdf_path_str, &doc_cache_dir)
+            office_convert_libreoffice(&docx_path_str, &pdf_path_str, &doc_cache_dir)
         }
         OfficeSoftware::None => {
             Err("未检测到可用的 Office 软件，请安装 Microsoft Word、WPS Office 或 LibreOffice".to_string())
@@ -1674,7 +1684,7 @@ async fn convert_docx_to_pdf_from_bytes(file_data: Vec<u8>, file_name: String, a
 }
 
 #[cfg(target_os = "windows")]
-fn convert_with_libreoffice(docx_path: &str, _pdf_path: &str, cache_dir: &std::path::Path) -> Result<(), String> {
+fn office_convert_libreoffice(docx_path: &str, _pdf_path: &str, cache_dir: &std::path::Path) -> Result<(), String> {
     use std::process::Command;
     let output_dir = cache_dir.to_str()
         .ok_or("Invalid cache directory path")?
@@ -1688,11 +1698,11 @@ fn convert_with_libreoffice(docx_path: &str, _pdf_path: &str, cache_dir: &std::p
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn convert_docx_to_pdf(docx_path: String, app: tauri::AppHandle) -> Result<String, String> {
+async fn office_convert_docx_to_pdf(docx_path: String, app: tauri::AppHandle) -> Result<String, String> {
     use std::process::Command;
     use std::fs;
     
-    let detection = detect_office_windows();
+    let detection = office_detect_windows();
     
     let docx = std::path::Path::new(&docx_path);
     let docx_absolute = std::fs::canonicalize(docx)
@@ -1724,10 +1734,10 @@ async fn convert_docx_to_pdf(docx_path: String, app: tauri::AppHandle) -> Result
     
     match detection.recommended {
         OfficeSoftware::MicrosoftWord => {
-            convert_with_word_com(&docx_path_str, &pdf_path_str)?;
+            office_convert_word(&docx_path_str, &pdf_path_str)?;
         }
         OfficeSoftware::WpsOffice => {
-            convert_with_wps_com(&docx_path_str, &pdf_path_str)?;
+            office_convert_wps(&docx_path_str, &pdf_path_str)?;
         }
         OfficeSoftware::LibreOffice => {
             let output_dir = doc_cache_dir.to_str()
@@ -1753,7 +1763,7 @@ async fn convert_docx_to_pdf(docx_path: String, app: tauri::AppHandle) -> Result
 }
 
 #[cfg(target_os = "windows")]
-fn convert_with_word_com(docx_path: &str, pdf_path: &str) -> Result<(), String> {
+fn office_convert_word(docx_path: &str, pdf_path: &str) -> Result<(), String> {
     use std::process::Command;
     
     println!("Word COM 转换开始");
@@ -1801,7 +1811,7 @@ fn convert_with_word_com(docx_path: &str, pdf_path: &str) -> Result<(), String> 
 }
 
 #[cfg(target_os = "windows")]
-fn convert_with_wps_com(docx_path: &str, pdf_path: &str) -> Result<(), String> {
+fn office_convert_wps(docx_path: &str, pdf_path: &str) -> Result<(), String> {
     use std::process::Command;
     
     println!("WPS COM 转换开始");
@@ -1855,13 +1865,13 @@ fn convert_with_wps_com(docx_path: &str, pdf_path: &str) -> Result<(), String> {
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-async fn convert_docx_to_pdf(_docx_path: String, _app: tauri::AppHandle) -> Result<String, String> {
+async fn office_convert_docx_to_pdf(_docx_path: String, _app: tauri::AppHandle) -> Result<String, String> {
     Err("此功能仅支持 Windows 系统".to_string())
 }
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn set_file_type_icons(app: tauri::AppHandle) -> Result<(), String> {
+async fn filetype_set_icons(app: tauri::AppHandle) -> Result<(), String> {
     use std::process::Command;
     use winreg::RegKey;
     use winreg::enums::*;
@@ -1887,7 +1897,7 @@ async fn set_file_type_icons(app: tauri::AppHandle) -> Result<(), String> {
     let classes_key = hkcu.create_subkey("Software\\Classes")
         .map_err(|e| format!("创建 Classes 键失败: {}", e))?.0;
     
-    fn setup_progid(
+    fn filetype_create_progid(
         classes_key: &RegKey,
         prog_id: &str,
         icon_path: &str,
@@ -1921,11 +1931,11 @@ async fn set_file_type_icons(app: tauri::AppHandle) -> Result<(), String> {
         Ok(())
     }
     
-    setup_progid(&classes_key, &format!("{}.pdf", app_id), &pdf_icon, &exe_path_str, "ViewStage PDF Document")?;
-    setup_progid(&classes_key, &format!("{}.docx", app_id), &word_icon, &exe_path_str, "ViewStage Word Document")?;
-    setup_progid(&classes_key, &format!("{}.doc", app_id), &word_icon, &exe_path_str, "ViewStage Word 97-2003 Document")?;
+    filetype_create_progid(&classes_key, &format!("{}.pdf", app_id), &pdf_icon, &exe_path_str, "ViewStage PDF Document")?;
+    filetype_create_progid(&classes_key, &format!("{}.docx", app_id), &word_icon, &exe_path_str, "ViewStage Word Document")?;
+    filetype_create_progid(&classes_key, &format!("{}.doc", app_id), &word_icon, &exe_path_str, "ViewStage Word 97-2003 Document")?;
     
-    fn associate_extension(classes_key: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
+    fn filetype_create_association(classes_key: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
         let (ext_key, _) = classes_key
             .create_subkey(ext)
             .map_err(|e| format!("创建 {} 键失败: {}", ext, e))?;
@@ -1942,11 +1952,11 @@ async fn set_file_type_icons(app: tauri::AppHandle) -> Result<(), String> {
         Ok(())
     }
     
-    associate_extension(&classes_key, ".pdf", &format!("{}.pdf", app_id))?;
-    associate_extension(&classes_key, ".docx", &format!("{}.docx", app_id))?;
-    associate_extension(&classes_key, ".doc", &format!("{}.doc", app_id))?;
+    filetype_create_association(&classes_key, ".pdf", &format!("{}.pdf", app_id))?;
+    filetype_create_association(&classes_key, ".docx", &format!("{}.docx", app_id))?;
+    filetype_create_association(&classes_key, ".doc", &format!("{}.doc", app_id))?;
     
-    fn set_default_program(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
+    fn filetype_update_default(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
         let user_choice_path = format!(
             "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\{}\\UserChoice",
             ext
@@ -1976,15 +1986,15 @@ async fn set_file_type_icons(app: tauri::AppHandle) -> Result<(), String> {
     
     let mut errors = Vec::new();
     
-    if let Err(e) = set_default_program(&hkcu, ".pdf", &format!("{}.pdf", app_id)) {
+    if let Err(e) = filetype_update_default(&hkcu, ".pdf", &format!("{}.pdf", app_id)) {
         errors.push(e);
     }
     
-    if let Err(e) = set_default_program(&hkcu, ".docx", &format!("{}.docx", app_id)) {
+    if let Err(e) = filetype_update_default(&hkcu, ".docx", &format!("{}.docx", app_id)) {
         errors.push(e);
     }
     
-    if let Err(e) = set_default_program(&hkcu, ".doc", &format!("{}.doc", app_id)) {
+    if let Err(e) = filetype_update_default(&hkcu, ".doc", &format!("{}.doc", app_id)) {
         errors.push(e);
     }
     
@@ -2026,7 +2036,7 @@ async fn set_file_type_icons() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn remove_file_type_icons() -> Result<(), String> {
+async fn filetype_delete_icons() -> Result<(), String> {
     use std::process::Command;
     use winreg::RegKey;
     use winreg::enums::*;
@@ -2037,7 +2047,7 @@ async fn remove_file_type_icons() -> Result<(), String> {
     
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     
-    fn remove_progid(hkcu: &RegKey, prog_id: &str) -> Result<(), String> {
+    fn filetype_delete_progid(hkcu: &RegKey, prog_id: &str) -> Result<(), String> {
         let classes_path = format!("Software\\Classes\\{}", prog_id);
         
         if let Ok(_) = hkcu.delete_subkey_all(&classes_path) {
@@ -2049,11 +2059,11 @@ async fn remove_file_type_icons() -> Result<(), String> {
         Ok(())
     }
     
-    remove_progid(&hkcu, &format!("{}.pdf", app_id))?;
-    remove_progid(&hkcu, &format!("{}.docx", app_id))?;
-    remove_progid(&hkcu, &format!("{}.doc", app_id))?;
+    filetype_delete_progid(&hkcu, &format!("{}.pdf", app_id))?;
+    filetype_delete_progid(&hkcu, &format!("{}.docx", app_id))?;
+    filetype_delete_progid(&hkcu, &format!("{}.doc", app_id))?;
     
-    fn remove_association(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
+    fn filetype_delete_association(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
         let openwith_path = format!("Software\\Classes\\{}\\OpenWithProgids", ext);
         
         if let Ok(openwith_key) = hkcu.open_subkey(&openwith_path) {
@@ -2065,11 +2075,11 @@ async fn remove_file_type_icons() -> Result<(), String> {
         Ok(())
     }
     
-    remove_association(&hkcu, ".pdf", &format!("{}.pdf", app_id))?;
-    remove_association(&hkcu, ".docx", &format!("{}.docx", app_id))?;
-    remove_association(&hkcu, ".doc", &format!("{}.doc", app_id))?;
+    filetype_delete_association(&hkcu, ".pdf", &format!("{}.pdf", app_id))?;
+    filetype_delete_association(&hkcu, ".docx", &format!("{}.docx", app_id))?;
+    filetype_delete_association(&hkcu, ".doc", &format!("{}.doc", app_id))?;
     
-    fn remove_user_choice(hkcu: &RegKey, ext: &str) -> Result<(), String> {
+    fn filetype_delete_user_choice(hkcu: &RegKey, ext: &str) -> Result<(), String> {
         let user_choice_path = format!(
             "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\{}\\UserChoice",
             ext
@@ -2084,9 +2094,9 @@ async fn remove_file_type_icons() -> Result<(), String> {
         Ok(())
     }
     
-    remove_user_choice(&hkcu, ".pdf")?;
-    remove_user_choice(&hkcu, ".docx")?;
-    remove_user_choice(&hkcu, ".doc")?;
+    filetype_delete_user_choice(&hkcu, ".pdf")?;
+    filetype_delete_user_choice(&hkcu, ".docx")?;
+    filetype_delete_user_choice(&hkcu, ".doc")?;
     
     let ps_script = r#"
         $code = @'
@@ -2114,7 +2124,7 @@ async fn remove_file_type_icons() -> Result<(), String> {
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-async fn remove_file_type_icons() -> Result<(), String> {
+async fn filetype_delete_icons() -> Result<(), String> {
     Err("此功能仅支持 Windows 系统".to_string())
 }
 
@@ -2138,16 +2148,16 @@ pub struct DocumentScanResult {
 
 /// 检查 DexiNed 模型是否存在
 #[tauri::command]
-fn check_dexined_model(app: tauri::AppHandle) -> Result<bool, String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_check_dexined(app: tauri::AppHandle) -> Result<bool, String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("dexined_mbv4.onnx");
     Ok(model_path.exists())
 }
 
 /// 导入 DexiNed 模型文件
 #[tauri::command]
-fn import_dexined_model(app: tauri::AppHandle, source_path: String) -> Result<(), String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_import_dexined(app: tauri::AppHandle, source_path: String) -> Result<(), String> {
+    let models_dir = dir_fetch_models(&app)?;
     
     let dest_path = models_dir.join("dexined_mbv4.onnx");
     
@@ -2161,8 +2171,8 @@ fn import_dexined_model(app: tauri::AppHandle, source_path: String) -> Result<()
 
 /// 删除 DexiNed 模型
 #[tauri::command]
-fn delete_dexined_model(app: tauri::AppHandle) -> Result<(), String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_delete_dexined(app: tauri::AppHandle) -> Result<(), String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("dexined_mbv4.onnx");
     
     if model_path.exists() {
@@ -2175,7 +2185,7 @@ fn delete_dexined_model(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 /// 使用 DexiNed 边缘检测 + 纯 Rust 检测文档边界
-fn detect_document_boundary_rust(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Option<Vec<(f32, f32)>> {
+fn scan_detect_boundary(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Option<Vec<(f32, f32)>> {
     let (_width, _height) = edge_image.dimensions();
     
     // 简化实现：直接返回 None，使用模型检测
@@ -2185,12 +2195,12 @@ fn detect_document_boundary_rust(edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) ->
 
 /// 非 Windows 平台的文档边界检测（返回 None）
 #[cfg(not(target_os = "windows"))]
-fn detect_document_boundary_rust(_edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Option<Vec<(f32, f32)>> {
+fn scan_detect_boundary(_edge_image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Option<Vec<(f32, f32)>> {
     None
 }
 
 /// 对图像进行透视变换（使用纯 Rust 实现）
-fn perspective_transform_rust(img: &DynamicImage, _corners: &[(f32, f32)]) -> Option<DynamicImage> {
+fn scan_calc_perspective_transform(img: &DynamicImage, _corners: &[(f32, f32)]) -> Option<DynamicImage> {
     // 简单实现：返回原始图像
     // 注意：完整的透视变换需要更复杂的实现
     Some(img.clone())
@@ -2198,26 +2208,26 @@ fn perspective_transform_rust(img: &DynamicImage, _corners: &[(f32, f32)]) -> Op
 
 /// 非 Windows 平台的透视变换（返回 None）
 #[cfg(not(target_os = "windows"))]
-fn perspective_transform_rust(_img: &DynamicImage, _corners: &[(f32, f32)]) -> Option<DynamicImage> {
+fn scan_calc_perspective_transform(_img: &DynamicImage, _corners: &[(f32, f32)]) -> Option<DynamicImage> {
     None
 }
 
 /// 文档扫描 - 自动选择最佳模型（优先DexiNed边界检测，其次DBNet文本检测）
 #[tauri::command]
-async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> Result<DocumentScanResult, String> {
-    let img = decode_base64_image(&request.image_data)?;
+async fn scan_process_document(app: tauri::AppHandle, request: DocumentScanRequest) -> Result<DocumentScanResult, String> {
+    let img = image_load_base64(&request.image_data)?;
     let grayscale = request.grayscale.unwrap_or(false);
     
     log::info!("开始文档扫描，图像尺寸: {}x{}, 黑白模式: {}", img.width(), img.height(), grayscale);
     
-    let models_dir = get_models_dir(&app)?;
+    let models_dir = dir_fetch_models(&app)?;
     log::info!("模型目录: {:?}", models_dir);
     
     let dexined_model_path = models_dir.join("dexined_mbv4.onnx");
     let dbnet_model_path = models_dir.join("text_detection_db_TD500_resnet18.onnx");
     
     let dexined_session = if dexined_model_path.exists() {
-        match get_or_load_dexined_model(&dexined_model_path) {
+        match model_load_dexined(&dexined_model_path) {
             Ok(session) => Some(session),
             Err(e) => {
                 log::warn!("加载 DexiNed 模型失败: {}", e);
@@ -2237,7 +2247,7 @@ async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> R
         if let Some(ref session) = dexined_session {
             log::info!("尝试使用 DexiNed 边界检测");
             
-            match try_dexined_boundary_detection(&img, session) {
+            match scan_try_dexined_boundary(&img, session) {
                 Ok(Some(transformed_img)) => {
                     log::info!("DexiNed 边界检测成功，已进行透视变换");
                     result_img = transformed_img;
@@ -2255,7 +2265,7 @@ async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> R
         if !used_dexined {
             text_bbox = if dbnet_model_path.exists() {
                 log::info!("尝试使用 ONNX Runtime DBNet 模型: {:?}", dbnet_model_path);
-                match detect_text_regions_dbnet_ort(&img, dbnet_model_path.to_string_lossy().to_string().as_str(), 0.1) {
+                match scan_detect_text_dbnet_ort(&img, dbnet_model_path.to_string_lossy().to_string().as_str(), 0.1) {
                     Ok(bbox) => {
                         log::info!("ONNX Runtime DBNet 检测成功: {:?}", bbox);
                         bbox
@@ -2291,7 +2301,7 @@ async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> R
             };
         }
 
-        let enhanced_img = match enhance_document_rust(&result_img, output_grayscale) {
+        let enhanced_img = match scan_enhance_document(&result_img, output_grayscale) {
             Ok(img) => img,
             Err(e) => {
                 log::error!("图像增强失败: {}", e);
@@ -2317,7 +2327,7 @@ async fn scan_document(app: tauri::AppHandle, request: DocumentScanRequest) -> R
 }
 
 /// 尝试使用 DexiNed 进行边界检测和透视变换
-fn try_dexined_boundary_detection(img: &DynamicImage, session: &Arc<Mutex<ort::session::Session>>) -> Result<Option<DynamicImage>, String> {
+fn scan_try_dexined_boundary(img: &DynamicImage, session: &Arc<Mutex<ort::session::Session>>) -> Result<Option<DynamicImage>, String> {
     use ort::value::Tensor;
     
     let (orig_width, orig_height) = (img.width(), img.height());
@@ -2389,11 +2399,11 @@ fn try_dexined_boundary_detection(img: &DynamicImage, session: &Arc<Mutex<ort::s
         image::imageops::FilterType::Triangle
     );
     
-    let corners = detect_document_boundary_rust(&final_edge);
+    let corners = scan_detect_boundary(&final_edge);
     
     match corners {
         Some(c) => {
-            let transformed = perspective_transform_rust(img, &c);
+            let transformed = scan_calc_perspective_transform(img, &c);
             Ok(transformed)
         }
         None => Ok(None)
@@ -2403,7 +2413,7 @@ fn try_dexined_boundary_detection(img: &DynamicImage, session: &Arc<Mutex<ort::s
 // ==================== OpenCV 文档增强 ====================
 
 #[cfg(target_os = "windows")]
-fn enhance_document_rust(img: &DynamicImage, grayscale: bool) -> Result<DynamicImage, String> {
+fn scan_enhance_document(img: &DynamicImage, grayscale: bool) -> Result<DynamicImage, String> {
     if !grayscale {
         return Ok(img.clone());
     }
@@ -2457,7 +2467,7 @@ fn enhance_document_rust(img: &DynamicImage, grayscale: bool) -> Result<DynamicI
 }
 
 #[cfg(not(target_os = "windows"))]
-fn enhance_document_rust(img: &DynamicImage, grayscale: bool) -> Result<DynamicImage, String> {
+fn scan_enhance_document(img: &DynamicImage, grayscale: bool) -> Result<DynamicImage, String> {
     if grayscale {
         Ok(img.grayscale())
     } else {
@@ -2472,21 +2482,21 @@ fn enhance_document_rust(img: &DynamicImage, grayscale: bool) -> Result<DynamicI
 
 // DBNet 文本检测现在使用 ONNX Runtime 实现
 #[cfg(not(target_os = "windows"))]
-fn detect_text_regions_dbnet(_img: &DynamicImage, _model_path: &str, _binary_threshold: f32) -> Result<Option<(i32, i32, i32, i32)>, String> {
+fn scan_detect_text_dbnet(_img: &DynamicImage, _model_path: &str, _binary_threshold: f32) -> Result<Option<(i32, i32, i32, i32)>, String> {
     Err("DBNet 文本检测仅支持 Windows 系统".to_string())
 }
 
 // ==================== ONNX Runtime DBNet 文本检测 ====================
 // 使用 ort (ONNX Runtime) 实现 DBNet 文本检测
 
-fn detect_text_regions_dbnet_ort(
+fn scan_detect_text_dbnet_ort(
     img: &DynamicImage,
     model_path: &str,
     binary_threshold: f32
 ) -> Result<Option<(i32, i32, i32, i32)>, String> {
     use ort::value::Tensor;
     
-    let session = get_or_load_dbnet_ort_model(std::path::Path::new(model_path))?;
+    let session = model_load_dbnet_ort(std::path::Path::new(model_path))?;
     let mut session = session.lock().unwrap();
     
     let (orig_width, orig_height) = (img.width() as i32, img.height() as i32);
@@ -2610,8 +2620,8 @@ pub struct ModelInfo {
 
 /// 获取 DBNet 模型信息
 #[tauri::command]
-fn get_dbnet_model_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_fetch_dbnet_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("text_detection_db_TD500_resnet18.onnx");
     
     let exists = model_path.exists();
@@ -2634,8 +2644,8 @@ fn get_dbnet_model_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
 
 /// 下载 DBNet 模型（带进度）
 #[tauri::command]
-async fn download_dbnet_model(app: tauri::AppHandle, window: tauri::Window) -> Result<(), String> {
-    let models_dir = get_models_dir(&app)?;
+async fn model_download_dbnet(app: tauri::AppHandle, window: tauri::Window) -> Result<(), String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("text_detection_db_TD500_resnet18.onnx");
     
     if model_path.exists() {
@@ -2694,8 +2704,8 @@ async fn download_dbnet_model(app: tauri::AppHandle, window: tauri::Window) -> R
 
 /// 删除 DBNet 模型
 #[tauri::command]
-fn delete_dbnet_model(app: tauri::AppHandle) -> Result<(), String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_delete_dbnet(app: tauri::AppHandle) -> Result<(), String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("text_detection_db_TD500_resnet18.onnx");
     
     if model_path.exists() {
@@ -2710,8 +2720,8 @@ fn delete_dbnet_model(app: tauri::AppHandle) -> Result<(), String> {
 
 /// 获取 UVDoc 模型信息
 #[tauri::command]
-fn get_uvdoc_model_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_fetch_uvdoc_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("uvdoc.onnx");
     
     let exists = model_path.exists();
@@ -2734,8 +2744,8 @@ fn get_uvdoc_model_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
 
 /// 下载 UVDoc 模型（带进度）
 #[tauri::command]
-async fn download_uvdoc_model(app: tauri::AppHandle, window: tauri::Window) -> Result<(), String> {
-    let models_dir = get_models_dir(&app)?;
+async fn model_download_uvdoc(app: tauri::AppHandle, window: tauri::Window) -> Result<(), String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("uvdoc.onnx");
     
     if model_path.exists() {
@@ -2794,8 +2804,8 @@ async fn download_uvdoc_model(app: tauri::AppHandle, window: tauri::Window) -> R
 
 /// 删除 UVDoc 模型
 #[tauri::command]
-fn delete_uvdoc_model(app: tauri::AppHandle) -> Result<(), String> {
-    let models_dir = get_models_dir(&app)?;
+fn model_delete_uvdoc(app: tauri::AppHandle) -> Result<(), String> {
+    let models_dir = dir_fetch_models(&app)?;
     let model_path = models_dir.join("uvdoc.onnx");
     
     if model_path.exists() {
@@ -2809,7 +2819,7 @@ fn delete_uvdoc_model(app: tauri::AppHandle) -> Result<(), String> {
 // ==================== 文档增强模型管理 ====================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn app_init_run() {
     use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config, TermLogger, TerminalMode, ColorChoice};
     use std::fs::File;
     
@@ -2926,48 +2936,50 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_cache_dir, 
-            get_cache_size,
-            clear_cache,
-            check_auto_clear_cache,
-            get_config_dir, 
-            get_cds_dir,
-            get_theme_dir,
-            rotate_image,
-            save_image,
-            compact_strokes,
-            open_settings_window,
-            open_doc_scan_window,
-            set_mirror_state,
-            get_mirror_state,
-            get_app_version,
-            check_update,
-            download_update,
-            get_settings,
-            save_settings,
-            reset_settings,
-            restart_app,
-            get_available_resolutions,
-            check_pdf_default_app,
-            close_splashscreen,
-            complete_oobe,
-            is_oobe_active,
-            exit_app,
-            detect_office,
-            convert_docx_to_pdf,
-            convert_docx_to_pdf_from_bytes,
-            set_file_type_icons,
-            remove_file_type_icons,
-            scan_document,
-            get_dbnet_model_info,
-            download_dbnet_model,
-            delete_dbnet_model,
-            get_uvdoc_model_info,
-            download_uvdoc_model,
-            delete_uvdoc_model,
-            check_dexined_model,
-            import_dexined_model,
-            delete_dexined_model
+            dir_fetch_cache, 
+            cache_fetch_size,
+            cache_delete_all,
+            cache_validate_auto_clear,
+            dir_fetch_config, 
+            dir_fetch_pictures_viewstage,
+            dir_fetch_theme,
+            image_update_rotation,
+            image_save_file,
+            stroke_format_compact,
+            window_show_settings,
+            window_show_doc_scan,
+            mirror_update_state,
+            mirror_fetch_state,
+            app_fetch_version,
+            update_fetch_check,
+            update_download_file,
+            settings_fetch_all,
+            settings_save_all,
+            settings_delete_all,
+            app_restart_process,
+            resolution_fetch_available,
+            filetype_validate_pdf_default,
+            window_hide_splashscreen,
+            oobe_submit_complete,
+            oobe_check_active,
+            main_signal_loaded,
+            main_check_loaded,
+            app_submit_exit,
+            office_detect_all,
+            office_convert_docx_to_pdf,
+            office_convert_docx_to_pdf_bytes,
+            filetype_set_icons,
+            filetype_delete_icons,
+            scan_process_document,
+            model_fetch_dbnet_info,
+            model_download_dbnet,
+            model_delete_dbnet,
+            model_fetch_uvdoc_info,
+            model_download_uvdoc,
+            model_delete_uvdoc,
+            model_check_dexined,
+            model_import_dexined,
+            model_delete_dexined
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

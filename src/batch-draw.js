@@ -25,24 +25,24 @@ class RealtimeBatchDrawManager {
         this.lastAdjustTime = 0;
         this.adjustCooldown = 100;
         
-        this.lowLoadFps = 60;
-        this.mediumLoadFps = 45;
-        this.highLoadFps = 30;
-        this.criticalLoadFps = 20;
+        this.LOW_LOAD_FPS = 60;
+        this.MEDIUM_LOAD_FPS = 45;
+        this.HIGH_LOAD_FPS = 30;
+        this.CRITICAL_LOAD_FPS = 20;
         
-        this.lowLoadThreshold = 10;
-        this.mediumLoadThreshold = 30;
-        this.highLoadThreshold = 50;
+        this.LOW_LOAD_THRESHOLD = 10;
+        this.MEDIUM_LOAD_THRESHOLD = 30;
+        this.HIGH_LOAD_THRESHOLD = 50;
     }
 
-    getCtx() {
+    batch_draw_fetch_ctx() {
         if (!this.ctx) {
             this.ctx = window.dom?.drawCtx;
         }
         return this.ctx;
     }
 
-    setFrameRateMode(mode) {
+    batch_draw_update_frame_rate(mode) {
         this.frameRateMode = mode;
         
         if (mode === 'low') {
@@ -57,23 +57,23 @@ class RealtimeBatchDrawManager {
         }
     }
 
-    get isAdaptive() {
+    get is_adaptive() {
         return this.frameRateMode === 'adaptive';
     }
 
-    calculateTargetFps(commandCount) {
-        if (commandCount < this.lowLoadThreshold) {
-            return this.lowLoadFps;
-        } else if (commandCount < this.mediumLoadThreshold) {
-            return this.mediumLoadFps;
-        } else if (commandCount < this.highLoadThreshold) {
-            return this.highLoadFps;
+    batch_draw_calc_target_fps(commandCount) {
+        if (commandCount < this.LOW_LOAD_THRESHOLD) {
+            return this.LOW_LOAD_FPS;
+        } else if (commandCount < this.MEDIUM_LOAD_THRESHOLD) {
+            return this.MEDIUM_LOAD_FPS;
+        } else if (commandCount < this.HIGH_LOAD_THRESHOLD) {
+            return this.HIGH_LOAD_FPS;
         } else {
-            return this.criticalLoadFps;
+            return this.CRITICAL_LOAD_FPS;
         }
     }
 
-    adjustFps(drawTime, commandCount) {
+    batch_draw_calc_adjust_fps(drawTime, commandCount) {
         const now = performance.now();
         if (now - this.lastAdjustTime < this.adjustCooldown) {
             return;
@@ -93,7 +93,7 @@ class RealtimeBatchDrawManager {
         const avgDrawTime = this.drawTimes.reduce((a, b) => a + b, 0) / this.drawTimes.length;
         const avgCommandCount = this.commandCounts.reduce((a, b) => a + b, 0) / this.commandCounts.length;
         
-        const targetFps = this.calculateTargetFps(avgCommandCount);
+        const targetFps = this.batch_draw_calc_target_fps(avgCommandCount);
         const currentFrameTime = 1000 / this.currentFps;
         
         if (avgDrawTime > currentFrameTime * 1.5) {
@@ -111,10 +111,10 @@ class RealtimeBatchDrawManager {
         }
     }
 
-    getStats() {
+    batch_draw_fetch_stats() {
         return {
             currentFps: this.currentFps,
-            targetFps: this.calculateTargetFps(this.pendingCount),
+            targetFps: this.batch_draw_calc_target_fps(this.pendingCount),
             pendingCount: this.pendingCount,
             avgDrawTime: this.drawTimes.length > 0 
                 ? this.drawTimes.reduce((a, b) => a + b, 0) / this.drawTimes.length 
@@ -123,7 +123,7 @@ class RealtimeBatchDrawManager {
         };
     }
 
-    addCommand(type, fromX, fromY, toX, toY, color, lineWidth) {
+    batch_draw_create_command(type, fromX, fromY, toX, toY, color, lineWidth) {
         const idx = this.pendingCount++;
         if (idx >= this.pendingCommands.length) {
             this.pendingCommands.push({ type, fromX, fromY, toX, toY, color, lineWidth });
@@ -138,39 +138,39 @@ class RealtimeBatchDrawManager {
             cmd.lineWidth = lineWidth;
         }
 
-        if (this.isAdaptive && this.pendingCount === 1) {
-            const targetFps = this.calculateTargetFps(1);
+        if (this.is_adaptive && this.pendingCount === 1) {
+            const targetFps = this.batch_draw_calc_target_fps(1);
             if (this.currentFps > targetFps) {
                 this.currentFps = targetFps;
                 this.drawInterval = 1000 / this.currentFps;
             }
         }
 
-        this.scheduleBatchDraw();
+        this.batch_draw_setup_schedule();
     }
 
-    scheduleBatchDraw() {
+    batch_draw_setup_schedule() {
         if (this.drawRafId !== null) return;
 
         const now = performance.now();
         const timeSinceLastDraw = now - this.lastDrawTime;
 
         if (timeSinceLastDraw >= this.drawInterval) {
-            this.flushPending();
+            this.batch_draw_handle_flush();
         } else {
             this.drawRafId = requestAnimationFrame(() => {
                 this.drawRafId = null;
-                this.flushPending();
+                this.batch_draw_handle_flush();
             });
         }
     }
 
-    flushPending() {
+    batch_draw_handle_flush() {
         const count = this.pendingCount;
         if (count === 0) return;
         this.pendingCount = 0;
 
-        const ctx = this.getCtx();
+        const ctx = this.batch_draw_fetch_ctx();
         if (!ctx) return;
 
         const drawStart = performance.now();
@@ -197,7 +197,7 @@ class RealtimeBatchDrawManager {
                 currentColor = cmd.color;
                 currentLineWidth = cmd.lineWidth;
 
-                const scale = window.getSafeScale ? window.getSafeScale() : 1;
+                const scale = window.main_fetch_safe_scale ? window.main_fetch_safe_scale() : 1;
                 
                 if (cmd.type === 'erase') {
                     ctx.globalCompositeOperation = 'destination-out';
@@ -229,12 +229,12 @@ class RealtimeBatchDrawManager {
         this.lastColor = currentColor;
         this.lastLineWidth = currentLineWidth;
 
-        if (this.isAdaptive) {
-            this.adjustFps(drawTime, count);
+        if (this.is_adaptive) {
+            this.batch_draw_calc_adjust_fps(drawTime, count);
         }
     }
 
-    _resetState() {
+    reset_state() {
         this.pendingCount = 0;
         this.pendingCommands.length = 0;
         if (this.drawRafId !== null) {
@@ -246,17 +246,17 @@ class RealtimeBatchDrawManager {
         this.lastLineWidth = null;
     }
 
-    startDrawing() {
+    batch_draw_init_start() {
         this.pendingCount = 0;
         this.pendingCommands.length = 0;
         this.lastDrawTime = performance.now();
         
-        if (this.isAdaptive) {
-            this.currentFps = this.lowLoadFps;
+        if (this.is_adaptive) {
+            this.currentFps = this.LOW_LOAD_FPS;
             this.drawInterval = 1000 / this.currentFps;
         }
         
-        const ctx = this.getCtx();
+        const ctx = this.batch_draw_fetch_ctx();
         if (ctx) {
             ctx.imageSmoothingEnabled = false;
             ctx.lineCap = 'round';
@@ -264,22 +264,22 @@ class RealtimeBatchDrawManager {
         }
     }
 
-    endDrawing() {
+    batch_draw_handle_end() {
         if (this.drawRafId !== null) {
             cancelAnimationFrame(this.drawRafId);
             this.drawRafId = null;
         }
 
-        this.flushPending();
+        this.batch_draw_handle_flush();
         
-        if (this.isAdaptive) {
+        if (this.is_adaptive) {
             this.drawTimes = [];
             this.commandCounts = [];
         }
     }
 
-    clear() {
-        this._resetState();
+    batch_draw_delete_all() {
+        this.reset_state();
     }
 }
 

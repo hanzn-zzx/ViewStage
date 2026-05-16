@@ -4,40 +4,40 @@
  */
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initDocScanEvents);
+    document.addEventListener('DOMContentLoaded', doc_scan_setup_events);
 } else {
-    initDocScanEvents();
+    doc_scan_setup_events();
 }
 
-function initDocScanEvents() {
+function doc_scan_setup_events() {
 }
 
-function toggleDocScanPanel() {
+function doc_scan_handle_panel_toggle() {
     const panel = window.dom?.docScanPanel;
     if (!panel) return;
     
     if (panel.classList.contains('visible')) {
-        hideDocScanPanel();
+        doc_scan_hide_panel();
     } else {
-        showDocScanPanel();
+        doc_scan_show_panel();
     }
 }
 
-function showDocScanPanel() {
+function doc_scan_show_panel() {
     if (!window.dom?.docScanPanel) return;
     
-    if (window.hidePenControlPanel) window.hidePenControlPanel();
-    if (window.hideSettingsPanel) window.hideSettingsPanel();
+    if (window.main_hide_pen_control_panel) window.main_hide_pen_control_panel();
+    if (window.main_hide_settings_panel) window.main_hide_settings_panel();
     
     window.dom.docScanPanel.classList.add('visible');
 }
 
-function hideDocScanPanel() {
+function doc_scan_hide_panel() {
     if (!window.dom?.docScanPanel) return;
     window.dom.docScanPanel.classList.remove('visible');
 }
 
-async function applyDocumentScan() {
+async function doc_scan_handle_apply() {
     const hasCamera = window.state?.isCameraOpen;
     const hasImage = window.state?.currentImage;
     const hasPdfPage = window.state?.currentFolderIndex >= 0 && window.state?.currentFolderPageIndex >= 0;
@@ -51,31 +51,31 @@ async function applyDocumentScan() {
     });
     
     if (!hasCamera && !hasImage && !hasPdfPage && !hasImageIndex) {
-        alert(window.i18n?.t('docScan.noImage') || '请先打开图片、文档或摄像头');
+        alert(window.i18n?.format_translate('docScan.noImage') || '请先打开图片、文档或摄像头');
         return;
     }
     
     try {
-        showProcessingIndicator();
+        doc_scan_show_processing();
         
-        const imageData = await getScanImageData();
+        const imageData = await doc_scan_fetch_image_data();
         
-        const result = await invokeDocumentScan(imageData);
+        const result = await doc_scan_handle_invoke(imageData);
         
-        await applyScanResult(result);
+        await doc_scan_handle_result(result);
         
-        hideDocScanPanel();
+        doc_scan_hide_panel();
         
         console.log('文档扫描完成，置信度:', result.confidence);
     } catch (error) {
         console.error('文档扫描失败:', error);
-        alert(window.i18n?.t('docScan.failed') || '文档扫描失败: ' + error.message);
+        alert(window.i18n?.format_translate('docScan.failed') || '文档扫描失败: ' + error.message);
     } finally {
-        hideProcessingIndicator();
+        doc_scan_hide_processing();
     }
 }
 
-async function getScanImageData() {
+async function doc_scan_fetch_image_data() {
     if (window.state?.isCameraOpen) {
         const video = document.getElementById('cameraVideo');
         if (!video) throw new Error('摄像头未找到');
@@ -106,7 +106,7 @@ async function getScanImageData() {
     throw new Error('没有可用的图像');
 }
 
-async function invokeDocumentScan(imageData) {
+async function doc_scan_handle_invoke(imageData) {
     if (!window.__TAURI__) {
         throw new Error('文档扫描功能需要Tauri后端支持');
     }
@@ -117,10 +117,10 @@ async function invokeDocumentScan(imageData) {
         image_data: imageData
     };
     
-    return await invoke('scan_document', { request });
+    return await invoke('scan_process_document', { request });
 }
 
-async function applyScanResult(result) {
+async function doc_scan_handle_result(result) {
     if (!result.enhanced_image) {
         throw new Error('扫描结果无效');
     }
@@ -134,28 +134,28 @@ async function applyScanResult(result) {
     });
     
     if (window.state?.isCameraOpen) {
-        if (window.addImageToListNoHighlight) {
-            const photoName = window.i18n?.t('docScan.scannedDoc') || `扫描文档${window.state.imageList.length + 1}`;
-            await window.addImageToListNoHighlight(enhancedImg, photoName);
+        if (window.main_save_image_to_list_no_highlight) {
+            const photoName = window.i18n?.format_translate('docScan.scannedDoc') || `扫描文档${window.state.imageList.length + 1}`;
+            await window.main_save_image_to_list_no_highlight(enhancedImg, photoName);
         }
     } else if (window.state?.currentImageIndex >= 0) {
         window.state.currentImage = enhancedImg;
         
-        if (window.updateImageDisplay) {
-            await window.updateImageDisplay();
+        if (window.main_render_image_centered) {
+            window.main_render_image_centered(enhancedImg);
         }
         
         if (window.state.imageList && window.state.currentImageIndex < window.state.imageList.length) {
             window.state.imageList[window.state.currentImageIndex].full = result.enhanced_image;
             window.state.imageList[window.state.currentImageIndex].thumbnail = result.enhanced_image;
             
-            if (window.updateSidebarContent) {
-                window.updateSidebarContent();
+            if (window.main_update_sidebar_content) {
+                window.main_update_sidebar_content();
             }
         }
         
-        if (window.clearAllDrawings) {
-            window.clearAllDrawings();
+        if (window.main_delete_all_drawings) {
+            window.main_delete_all_drawings();
         }
     }
     
@@ -164,25 +164,25 @@ async function applyScanResult(result) {
     }
 }
 
-function showProcessingIndicator() {
+function doc_scan_show_processing() {
     const btn = document.getElementById('btnApplyScan');
     if (btn) {
         btn.disabled = true;
-        btn.textContent = window.i18n?.t('docScan.processing') || '处理中...';
+        btn.textContent = window.i18n?.format_translate('docScan.processing') || '处理中...';
     }
 }
 
-function hideProcessingIndicator() {
+function doc_scan_hide_processing() {
     const btn = document.getElementById('btnApplyScan');
     if (btn) {
         btn.disabled = false;
-        btn.textContent = window.i18n?.t('docScan.apply') || '应用';
+        btn.textContent = window.i18n?.format_translate('docScan.apply') || '应用';
     }
 }
 
-window.toggleDocScanPanel = toggleDocScanPanel;
-window.showDocScanPanel = showDocScanPanel;
-window.hideDocScanPanel = hideDocScanPanel;
-window.applyDocumentScan = applyDocumentScan;
+window.doc_scan_handle_panel_toggle = doc_scan_handle_panel_toggle;
+window.doc_scan_show_panel = doc_scan_show_panel;
+window.doc_scan_hide_panel = doc_scan_hide_panel;
+window.doc_scan_handle_apply = doc_scan_handle_apply;
 
 console.log('文档扫描模块已加载');

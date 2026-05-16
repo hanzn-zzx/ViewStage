@@ -8,17 +8,17 @@ const ThemeManager = {
     this.isSettingsPage = window.location.pathname.includes('settings.html');
     
     if (!themeName) {
-      themeName = await this.getSavedTheme();
+      themeName = await this.theme_fetch_saved();
     }
     
-    await this.setTheme(themeName);
+    await this.theme_update_active(themeName);
   },
 
-  async getSavedTheme() {
+  async theme_fetch_saved() {
     if (window.__TAURI__) {
       try {
         const { invoke } = window.__TAURI__.core;
-        const settings = await invoke('get_settings');
+        const             settings = await invoke('settings_fetch_all');
         return settings?.theme || 'simplify';
       } catch (e) {
         console.warn('无法获取保存的主题设置:', e);
@@ -27,15 +27,15 @@ const ThemeManager = {
     return 'simplify';
   },
 
-  async setTheme(themeName) {
+  async theme_update_active(themeName) {
     try {
       let themeModule = null;
       
-      if (window.__TAURI__ && !this.isBuiltInTheme(themeName)) {
+      if (window.__TAURI__ && !this.theme_validate_builtin(themeName)) {
         if (!this.userThemePath) {
           const { invoke } = window.__TAURI__.core;
           try {
-            this.userThemePath = await invoke('get_theme_dir');
+            this.userThemePath = await invoke('dir_fetch_theme');
           } catch (e) {
             console.warn('无法获取用户主题目录:', e);
           }
@@ -43,10 +43,10 @@ const ThemeManager = {
         
         if (this.userThemePath) {
           const userThemeDir = `${this.userThemePath}/${themeName}`;
-          const hasUserTheme = await this.checkUserTheme(userThemeDir);
+          const hasUserTheme = await this.theme_validate_user(userThemeDir);
           
           if (hasUserTheme) {
-            themeModule = await this.loadUserTheme(userThemeDir, themeName);
+            themeModule = await this.theme_load_user(userThemeDir, themeName);
           }
         }
       }
@@ -59,22 +59,22 @@ const ThemeManager = {
       this.currentThemeModule = themeModule;
       this.currentTheme = themeName;
       
-      if (this.currentThemeModule.load) {
-        await this.currentThemeModule.load(this.isSettingsPage);
+      if (this.currentThemeModule.load_theme) {
+        await this.currentThemeModule.load_theme(this.isSettingsPage);
       }
-      this.applyToolbarTextVisibility();
-      this.loadIcons();
+      this.theme_update_toolbar_text_visibility();
+      this.theme_load_icons();
     } catch (error) {
       console.error(`Failed to load theme: ${themeName}`, error);
     }
   },
 
-  isBuiltInTheme(themeName) {
+  theme_validate_builtin(themeName) {
     const builtInThemes = ['dark', 'simplify'];
     return builtInThemes.includes(themeName);
   },
 
-  async checkUserTheme(themeDir) {
+  async theme_validate_user(themeDir) {
     if (!window.__TAURI__) return false;
     
     const { fs } = window.__TAURI__;
@@ -87,7 +87,7 @@ const ThemeManager = {
     }
   },
 
-  async loadUserTheme(themeDir, themeName) {
+  async theme_load_user(themeDir, themeName) {
     const { fs, convertFileSrc } = window.__TAURI__;
     
     const configPath = `${themeDir}/theme.json`;
@@ -99,53 +99,53 @@ const ThemeManager = {
       config: config,
       themeDir: themeDir,
       
-      async load() {
+      async load_theme() {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = convertFileSrc(`${this.themeDir}/theme.css`);
         document.head.appendChild(link);
       },
       
-      getIconPath(iconName) {
+      fetch_icon_path(iconName) {
         const actualName = this.config?.icons?.[iconName] || iconName;
         return convertFileSrc(`${this.themeDir}/icons/${actualName}.svg`);
       },
       
-      getShowToolbarText() {
+      fetch_toolbar_text() {
         return this.config?.showToolbarText !== false;
       },
       
-      getCanvasBgColor() {
+      fetch_canvas_bg_color() {
         return this.config?.canvasBgColor || '#2a2a2a';
       },
       
-      getShowAuroraEffect() {
+      fetch_aurora_effect() {
         return this.config?.showAuroraEffect !== false;
       }
     };
   },
 
-  getTheme() {
+  theme_fetch_current() {
     return this.currentTheme;
   },
 
-  getShowToolbarText() {
-    if (this.currentThemeModule && this.currentThemeModule.getShowToolbarText) {
-      return this.currentThemeModule.getShowToolbarText();
+  theme_fetch_toolbar_text() {
+    if (this.currentThemeModule && this.currentThemeModule.fetch_toolbar_text) {
+      return this.currentThemeModule.fetch_toolbar_text();
     }
     return true;
   },
 
-  getCanvasBgColor() {
-    if (this.currentThemeModule && this.currentThemeModule.getCanvasBgColor) {
-      return this.currentThemeModule.getCanvasBgColor();
+  theme_fetch_canvas_bg_color() {
+    if (this.currentThemeModule && this.currentThemeModule.fetch_canvas_bg_color) {
+      return this.currentThemeModule.fetch_canvas_bg_color();
     }
     return '#2a2a2a';
   },
 
-  getNoCameraMessageStyle() {
-    if (this.currentThemeModule && this.currentThemeModule.getNoCameraMessageStyle) {
-      return this.currentThemeModule.getNoCameraMessageStyle();
+  theme_fetch_no_camera_style() {
+    if (this.currentThemeModule && this.currentThemeModule.fetch_no_camera_style) {
+      return this.currentThemeModule.fetch_no_camera_style();
     }
     return {
       textColor: '#ffffff',
@@ -155,17 +155,17 @@ const ThemeManager = {
     };
   },
 
-  getShowAuroraEffect() {
-    if (this.currentThemeModule && this.currentThemeModule.getShowAuroraEffect) {
-      return this.currentThemeModule.getShowAuroraEffect();
+  theme_fetch_aurora_effect() {
+    if (this.currentThemeModule && this.currentThemeModule.fetch_aurora_effect) {
+      return this.currentThemeModule.fetch_aurora_effect();
     }
     return true;
   },
 
-  applyToolbarTextVisibility() {
+  theme_update_toolbar_text_visibility() {
     const toolbar = document.querySelector('.toolbar');
     if (toolbar) {
-      if (this.getShowToolbarText()) {
+      if (this.theme_fetch_toolbar_text()) {
         toolbar.classList.remove('hide-text');
       } else {
         toolbar.classList.add('hide-text');
@@ -173,24 +173,24 @@ const ThemeManager = {
     }
   },
 
-  getIconPath(iconName) {
-    if (this.currentThemeModule && this.currentThemeModule.getIconPath) {
-      return this.currentThemeModule.getIconPath(iconName);
+  theme_fetch_icon_path(iconName) {
+    if (this.currentThemeModule && this.currentThemeModule.fetch_icon_path) {
+      return this.currentThemeModule.fetch_icon_path(iconName);
     }
     return `themes/${this.currentTheme}/icons/${iconName}.svg`;
   },
 
-  getIcon(iconName, options = {}) {
+  theme_fetch_icon(iconName, options = {}) {
     const { width = 16, height = 16, alt = '', style = '' } = options;
-    const src = this.getIconPath(iconName);
+    const src = this.theme_fetch_icon_path(iconName);
     return `<img src="${src}" width="${width}" height="${height}" alt="${alt}" style="${style}">`;
   },
 
-  loadIcons() {
+  theme_load_icons() {
     const icons = document.querySelectorAll('[data-icon]');
     icons.forEach(img => {
       const iconName = img.getAttribute('data-icon');
-      img.src = this.getIconPath(iconName);
+      img.src = this.theme_fetch_icon_path(iconName);
     });
   }
 };

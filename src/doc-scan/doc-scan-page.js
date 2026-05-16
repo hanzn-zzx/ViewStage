@@ -16,17 +16,17 @@ const state = {
 
 const dom = {};
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', doc_scan_page_init);
 
-async function init() {
-    initDOM();
-    initEventListeners();
-    await loadThemeColor();
-    listenThemeChange();
-    startCameraPreview();
+async function doc_scan_page_init() {
+    doc_scan_page_init_dom();
+    doc_scan_page_setup_events();
+    await doc_scan_page_load_theme();
+    doc_scan_page_setup_theme_listener();
+    doc_scan_page_init_camera();
 }
 
-function initDOM() {
+function doc_scan_page_init_dom() {
     dom.btnCapture = document.getElementById('btnCapture');
     dom.btnBack = document.getElementById('btnBack');
     dom.grayscaleToggle = document.getElementById('grayscaleToggle');
@@ -39,20 +39,20 @@ function initDOM() {
     dom.imageCount = document.getElementById('imageCount');
 }
 
-function initEventListeners() {
-    dom.btnCapture.addEventListener('click', handleCaptureButtonClick);
-    dom.btnBack.addEventListener('click', closeWindow);
+function doc_scan_page_setup_events() {
+    dom.btnCapture.addEventListener('click', doc_scan_page_handle_capture);
+    dom.btnBack.addEventListener('click', doc_scan_page_hide_window);
 }
 
-function handleCaptureButtonClick() {
+function doc_scan_page_handle_capture() {
     if (state.isViewingImage) {
-        returnToCamera();
+        doc_scan_page_show_camera();
     } else {
-        captureAndEnhance();
+        doc_scan_page_handle_capture_enhance();
     }
 }
 
-function returnToCamera() {
+function doc_scan_page_show_camera() {
     state.isViewingImage = false;
     state.selectedImageIndex = -1;
     
@@ -62,21 +62,21 @@ function returnToCamera() {
     dom.btnCapture.textContent = '拍摄';
     dom.btnCapture.classList.add('primary');
     
-    updateSidebarContent();
+    doc_scan_page_update_sidebar();
 }
 
-async function loadThemeColor() {
+async function doc_scan_page_load_theme() {
     try {
         if (window.__TAURI__) {
             const { invoke } = window.__TAURI__.core;
-            const settings = await invoke('get_settings');
+            const settings = await invoke('settings_fetch_all');
             const themeName = settings?.theme || 'simplify';
             
             const themeModule = await import(`../themes/${themeName}/theme.js`);
             const theme = themeModule.default;
-            await theme.load?.();
+            await theme.load_theme?.();
             
-            const bgColor = theme.getCanvasBgColor?.() || '#1a1a1a';
+            const bgColor = theme.fetch_canvas_bg_color?.() || '#1a1a1a';
             document.documentElement.style.setProperty('--doc-scan-bg-color', bgColor);
             document.documentElement.style.setProperty('--doc-scan-preview-bg', bgColor);
         }
@@ -85,7 +85,7 @@ async function loadThemeColor() {
     }
 }
 
-function listenThemeChange() {
+function doc_scan_page_setup_theme_listener() {
     if (window.__TAURI__) {
         const { listen } = window.__TAURI__.event;
         listen('settings-changed', async (event) => {
@@ -94,7 +94,7 @@ function listenThemeChange() {
                 try {
                     const themeModule = await import(`../themes/${settings.theme}/theme.js`);
                     const theme = themeModule.default;
-                    const bgColor = theme.getCanvasBgColor?.() || '#1a1a1a';
+                    const bgColor = theme.fetch_canvas_bg_color?.() || '#1a1a1a';
                     document.documentElement.style.setProperty('--doc-scan-bg-color', bgColor);
                     document.documentElement.style.setProperty('--doc-scan-preview-bg', bgColor);
                 } catch (error) {
@@ -105,7 +105,7 @@ function listenThemeChange() {
     }
 }
 
-async function closeWindow() {
+async function doc_scan_page_hide_window() {
     if (state.cameraStream) {
         state.cameraStream.getTracks().forEach(track => track.stop());
     }
@@ -117,7 +117,7 @@ async function closeWindow() {
     }
 }
 
-async function startCameraPreview() {
+async function doc_scan_page_init_camera() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment' }
@@ -132,10 +132,10 @@ async function startCameraPreview() {
     }
 }
 
-async function captureAndEnhance() {
+async function doc_scan_page_handle_capture_enhance() {
     if (state.isProcessing) return;
     if (!state.isCameraOpen) {
-        await startCameraPreview();
+        await doc_scan_page_init_camera();
         return;
     }
     
@@ -156,14 +156,14 @@ async function captureAndEnhance() {
         console.log('图像已捕获，大小:', state.currentImage.length);
         
         console.log('调用 scan_document...');
-        const result = await invokeDocumentScan(state.currentImage);
+        const result = await doc_scan_page_handle_scan(state.currentImage);
         console.log('scan_document 结果:', result);
         
         state.enhancedImage = result.enhanced_image;
         
-        await addToLocalList(state.enhancedImage);
+        await doc_scan_page_create_local_item(state.enhancedImage);
         
-        await saveToMainApp();
+        await doc_scan_page_save_to_main();
         
     } catch (error) {
         console.error('处理失败:', error);
@@ -175,7 +175,7 @@ async function captureAndEnhance() {
     }
 }
 
-async function invokeDocumentScan(imageData) {
+async function doc_scan_page_handle_scan(imageData) {
     if (!window.__TAURI__) {
         throw new Error('需要Tauri环境');
     }
@@ -189,11 +189,11 @@ async function invokeDocumentScan(imageData) {
         grayscale: grayscale
     };
     
-    return await invoke('scan_document', { request });
+    return await invoke('scan_process_document', { request });
 }
 
-async function addToLocalList(imageData) {
-    const thumbnail = await generateThumbnail(imageData, 100);
+async function doc_scan_page_create_local_item(imageData) {
+    const thumbnail = await doc_scan_page_calc_thumbnail(imageData, 100);
     
     const imgData = {
         full: imageData,
@@ -204,10 +204,10 @@ async function addToLocalList(imageData) {
     
     state.scannedImages.push(imgData);
     
-    updateSidebarContent();
+    doc_scan_page_update_sidebar();
 }
 
-async function generateThumbnail(dataUrl, size) {
+async function doc_scan_page_calc_thumbnail(dataUrl, size) {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -231,7 +231,7 @@ async function generateThumbnail(dataUrl, size) {
     });
 }
 
-function updateSidebarContent() {
+function doc_scan_page_update_sidebar() {
     if (!dom.sidebarContent) return;
     
     dom.imageCount.textContent = state.scannedImages.length;
@@ -261,18 +261,18 @@ function updateSidebarContent() {
         
         item.querySelector('.sidebar-btn-delete')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            deleteImage(index);
+            doc_scan_page_delete_image(index);
         });
         
-        item.addEventListener('click', () => selectImage(index));
+        item.addEventListener('click', () => doc_scan_page_update_selection(index));
     });
 }
 
-function selectImage(index) {
+function doc_scan_page_update_selection(index) {
     if (index < 0 || index >= state.scannedImages.length) return;
     
     if (state.selectedImageIndex === index && state.isViewingImage) {
-        returnToCamera();
+        doc_scan_page_show_camera();
         return;
     }
     
@@ -296,10 +296,10 @@ function selectImage(index) {
     dom.btnCapture.textContent = '返回摄像头';
     dom.btnCapture.classList.remove('primary');
     
-    updateSidebarContent();
+    doc_scan_page_update_sidebar();
 }
 
-function deleteImage(index) {
+function doc_scan_page_delete_image(index) {
     if (index < 0 || index >= state.scannedImages.length) return;
     
     state.scannedImages.splice(index, 1);
@@ -307,19 +307,19 @@ function deleteImage(index) {
     if (state.selectedImageIndex === index) {
         if (state.scannedImages.length > 0) {
             state.selectedImageIndex = Math.min(index, state.scannedImages.length - 1);
-            selectImage(state.selectedImageIndex);
+            doc_scan_page_update_selection(state.selectedImageIndex);
         } else {
-            returnToCamera();
+            doc_scan_page_show_camera();
         }
     } else if (state.selectedImageIndex > index) {
         state.selectedImageIndex--;
-        updateSidebarContent();
+        doc_scan_page_update_sidebar();
     } else {
-        updateSidebarContent();
+        doc_scan_page_update_sidebar();
     }
 }
 
-async function saveToMainApp() {
+async function doc_scan_page_save_to_main() {
     if (!state.enhancedImage) return;
     
     try {

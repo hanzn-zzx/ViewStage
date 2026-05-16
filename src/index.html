@@ -9,8 +9,24 @@
     <script src="JS/pdf.min.js"></script>
     <script src="doc-scan/doc-scan.js"></script>
     <script src="i18n.js"></script>
-    <script type="module" src="themes/theme.js"></script>
-    <script type="module" src="main.js"></script>
+    <script>
+        window.__TAURI__?.core.invoke('main_signal_loaded').catch(()=>{});
+        (async()=>{
+            try {
+                await import('./themes/theme.js');
+                await import('./main.js');
+                await import('./init.js');
+            } catch(e) {
+                console.error('[boot] module load error:', e);
+                try {
+                    const msg = '模块加载失败: ' + (e.message || e);
+                    document.getElementById('canvasContainer') &&
+                    (document.getElementById('canvasContainer').innerHTML =
+                        '<div style="padding:40px;color:red;font-size:18px">' + msg + '</div>');
+                } catch(_) {}
+            }
+        })();
+    </script>
     <script>document.addEventListener('contextmenu', e => e.preventDefault());</script>
 </head>
 <body>

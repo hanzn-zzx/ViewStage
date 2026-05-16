@@ -158,11 +158,14 @@
     </div>
 
     <script>
+        console.log('[splash] script start, __TAURI__:', !!window.__TAURI__);
         const loadingBar = document.getElementById('loadingBar');
         const loadingText = document.getElementById('loadingText');
+        console.log('[splash] DOM refs:', { bar: !!loadingBar, text: !!loadingText });
         
-        const { listen } = window.__TAURI__?.event || {};
-        const { invoke } = window.__TAURI__?.core || {};
+        const listen = window.__TAURI__?.event?.listen;
+        const invoke = window.__TAURI__?.core?.invoke;
+        console.log('[splash] Tauri APIs:', { hasListen: !!listen, hasInvoke: !!invoke });
         
         const loadingSteps = [
             { key: 'init', text: '正在初始化...', progress: 10 },
@@ -175,7 +178,8 @@
         
         let currentStep = 0;
         
-        function applyTheme(themeName) {
+        function splash_apply_theme(themeName) {
+            console.log('[splash] applyTheme:', themeName);
             document.body.classList.remove('theme-simplify', 'theme-dark');
             if (themeName === 'simplify') {
                 document.body.classList.add('theme-simplify');
@@ -184,22 +188,27 @@
             }
         }
         
-        async function loadTheme() {
+        async function splash_load_theme() {
+            console.log('[splash] loadTheme start, hasInvoke:', !!invoke);
             if (invoke) {
                 try {
-                    const settings = await invoke('get_settings');
+                    const settings = await invoke('settings_fetch_all');
+                    console.log('[splash] settings loaded:', settings?.theme);
                     const themeName = settings.theme || 'simplify';
-                    applyTheme(themeName);
+                    splash_apply_theme(themeName);
                 } catch (e) {
-                    console.log('加载主题设置失败:', e);
-                    applyTheme('dark');
+                    console.log('[splash] 加载主题设置失败:', e?.message || e);
+                    splash_apply_theme('dark');
                 }
             } else {
-                applyTheme('dark');
+                console.log('[splash] no invoke, using dark');
+                splash_apply_theme('dark');
             }
+            console.log('[splash] loadTheme done');
         }
         
-        function updateProgress(step) {
+        function splash_update_progress(step) {
+            console.log('[splash] progress:', step);
             const stepData = loadingSteps[step];
             if (stepData) {
                 loadingBar.style.width = stepData.progress + '%';
@@ -207,28 +216,63 @@
             }
         }
         
-        updateProgress(0);
-        loadTheme();
+        console.log('[splash] initial progress 0');
+        splash_update_progress(0);
+        splash_load_theme().then(() => console.log('[splash] splash_load_theme promise resolved'));
         
         if (listen) {
+            console.log('[splash] registering listen splash-progress');
             listen('splash-progress', (event) => {
                 const { step, message } = event.payload || {};
+                console.log('[splash] event received:', { step, message });
+                
+                if (step === -1) {
+                    // 诊断信息
+                    console.log('[splash] DIAG:', message);
+                    loadingText.textContent = '诊断: ' + message;
+                    return;
+                }
                 
                 if (step !== undefined) {
-                    updateProgress(step);
+                    splash_update_progress(step);
                 }
                 
                 if (message) {
                     loadingText.textContent = message;
                 }
+            }).then(() => {
+                console.log('[splash] listen registered successfully');
+            }).catch((err) => {
+                console.log('[splash] listen failed:', err?.message || err);
             });
+        } else {
+            console.log('[splash] listen API not available');
         }
         
+        console.log('[splash] setting fallback timeout 300ms');
         setTimeout(() => {
+            console.log('[splash] fallback timeout fired, currentStep:', currentStep);
             if (currentStep === 0) {
-                updateProgress(1);
+                splash_update_progress(1);
             }
         }, 300);
+        
+        // 诊断：如果 5 秒后没有收到任何 progress 事件，检查主窗口状态
+        setTimeout(async () => {
+            console.log('[splash] diagnostic check start');
+            if (invoke) {
+                try {
+                    const loaded = await invoke('main_check_loaded');
+                    console.log('[splash] main_check_loaded =', loaded);
+                    if (!loaded) {
+                        loadingText.textContent = '诊断：主窗口脚本未加载，检查控制台错误';
+                        loadingText.style.color = '#ff6b6b';
+                    }
+                } catch (e) {
+                    console.log('[splash] diagnostic error:', e);
+                }
+            }
+        }, 5000);
     </script>
 </body>
 </html>

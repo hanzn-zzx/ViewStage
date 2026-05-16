@@ -66,7 +66,6 @@
     "correctOrientation": "矯正傾斜",
     "sharpen": "銳化增強",
     "beautify": "筆記美化",
-    "apply": "應用",
     "cancel": "取消",
     "noImage": "請先開啟圖片、文件或攝像頭",
     "processing": "處理中...",
@@ -193,7 +192,13 @@
     "resolutionUltra": "極致",
     "resolutionExtreme": "極限",
     "maximum": "最大",
-    "colorN": "顏色{n}"
+    "colorN": "顏色{n}",
+    "pdfDefaultSetSuccess": "PDF 已設為預設開啟方式",
+    "pdfDefaultSetFailed": "設定 PDF 預設開啟方式失敗",
+    "pdfDefaultRemoved": "已取消 PDF 預設開啟方式設定",
+    "wordDefaultSetSuccess": "Word 文件已設為預設開啟方式",
+    "wordDefaultSetFailed": "設定 Word 預設開啟方式失敗",
+    "wordDefaultRemoved": "已取消 Word 文件預設開啟方式設定"
   },
   "oobe": {
     "welcome": "歡迎使用 ViewStage",

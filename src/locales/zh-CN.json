@@ -66,7 +66,6 @@
     "correctOrientation": "矫正倾斜",
     "sharpen": "锐化增强",
     "beautify": "笔记美化",
-    "apply": "应用",
     "cancel": "取消",
     "noImage": "请先打开图片、文档或摄像头",
     "processing": "处理中...",
@@ -149,7 +148,6 @@
     "checkUpdate": "检查更新",
     "openSource": "开源许可",
     "checkingUpdate": "正在检查更新...",
-    "latestVersion": "当前已是最新版本",
     "newVersionFound": "发现新版本",
     "updateCheckFailed": "检查更新失败，请稍后重试",
     "confirmReset": "确认重置",
@@ -227,7 +225,13 @@
     "updateCheckFailedDetail": "检查更新失败，请稍后重试",
     "fileSize": "文件大小",
     "downloadingUpdate": "正在下载更新 {percent}%",
-    "useMirror": "使用国内镜像下载"
+    "useMirror": "使用国内镜像下载",
+    "pdfDefaultSetSuccess": "PDF 已设置为默认打开方式",
+    "pdfDefaultSetFailed": "设置 PDF 默认打开方式失败",
+    "pdfDefaultRemoved": "已取消 PDF 默认打开方式设置",
+    "wordDefaultSetSuccess": "Word 文档已设置为默认打开方式",
+    "wordDefaultSetFailed": "设置 Word 默认打开方式失败",
+    "wordDefaultRemoved": "已取消 Word 文档默认打开方式设置"
   },
   "oobe": {
     "welcome": "欢迎使用 ViewStage",

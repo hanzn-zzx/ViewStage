@@ -66,7 +66,6 @@
     "correctOrientation": "Auto Orient",
     "sharpen": "Sharpen",
     "beautify": "Beautify",
-    "apply": "Apply",
     "cancel": "Cancel",
     "noImage": "Open an image, document or camera first",
     "processing": "Processing...",
@@ -149,7 +148,6 @@
     "checkUpdate": "Check Updates",
     "openSource": "Open Source",
     "checkingUpdate": "Checking...",
-    "latestVersion": "Up to date",
     "newVersionFound": "New version available",
     "updateCheckFailed": "Check failed. Try again later.",
     "confirmReset": "Confirm Reset",
@@ -227,7 +225,13 @@
     "updateCheckFailedDetail": "Check failed. Try again later.",
     "fileSize": "File Size",
     "downloadingUpdate": "Downloading {percent}%",
-    "useMirror": "Use Mirror"
+    "useMirror": "Use Mirror",
+    "pdfDefaultSetSuccess": "PDF has been set as default",
+    "pdfDefaultSetFailed": "Failed to set PDF as default",
+    "pdfDefaultRemoved": "PDF default setting has been removed",
+    "wordDefaultSetSuccess": "Word has been set as default",
+    "wordDefaultSetFailed": "Failed to set Word as default",
+    "wordDefaultRemoved": "Word default setting has been removed"
   },
   "oobe": {
     "welcome": "Welcome to ViewStage",

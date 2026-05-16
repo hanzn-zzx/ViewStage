@@ -2,14 +2,14 @@ const SimplifyTheme = {
   name: 'simplify',
   config: null,
   
-  getBasePath() {
+  fetch_base_path() {
     const parts = window.location.pathname.split('/').filter(p => p);
     const depth = Math.max(0, parts.length - 1);
     return '../'.repeat(depth);
   },
   
-  async load(isSettingsPage = false) {
-    const base = this.getBasePath();
+  async load_theme(isSettingsPage = false) {
+    const base = this.fetch_base_path();
     const response = await fetch(`${base}themes/simplify/theme.json`);
     this.config = await response.json();
     
@@ -26,21 +26,21 @@ const SimplifyTheme = {
     }
   },
   
-  getIconPath(iconName) {
+  fetch_icon_path(iconName) {
     const actualName = this.config?.icons?.[iconName] || iconName;
-    const base = this.getBasePath();
+    const base = this.fetch_base_path();
     return `${base}themes/simplify/icons/${actualName}.svg`;
   },
   
-  getShowToolbarText() {
+  fetch_toolbar_text() {
     return this.config?.showToolbarText !== false;
   },
   
-  getCanvasBgColor() {
+  fetch_canvas_bg_color() {
     return this.config?.canvasBgColor || '#ffffff';
   },
   
-  getNoCameraMessageStyle() {
+  fetch_no_camera_style() {
     return this.config?.noCameraMessage || {
       textColor: '#1a1a1a',
       secondaryTextColor: 'rgba(0,0,0,0.6)',
@@ -49,7 +49,7 @@ const SimplifyTheme = {
     };
   },
 
-  getShowAuroraEffect() {
+  fetch_aurora_effect() {
     return this.config?.showAuroraEffect !== false;
   }
 };

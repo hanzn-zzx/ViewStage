@@ -9,10 +9,10 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await i18n.init();
+    await i18n.init_start();
     
     // ==================== 自定义弹窗函数 ====================
-    function showSettingsDialog(title, message, type = 'info') {
+    function settings_show_dialog(title, message, type = 'info') {
         const existing = document.getElementById('settingsDialog');
         if (existing) existing.remove();
         
@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="settings-dialog-icon">${icon}</div>
                 <div class="settings-dialog-title">${title}</div>
                 <div class="settings-dialog-message">${message}</div>
-                <button class="settings-dialog-btn" id="settingsDialogClose">${window.i18n?.t('common.confirm') || '确定'}</button>
+                <button class="settings-dialog-btn" id="settingsDialogClose">${window.i18n?.format_translate('common.confirm') || '确定'}</button>
             </div>
         `;
         document.body.appendChild(dialog);
@@ -47,11 +47,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     /**
      * 加载应用版本号和版权年份
      */
-    async function loadAppVersion() {
+    async function settings_load_version() {
         if (window.__TAURI__) {
             try {
                 const { invoke } = window.__TAURI__.core;
-                const version = await invoke('get_app_version');
+                const version = await invoke('app_fetch_version');
                 
                 const versionNumber = document.getElementById('versionNumber');
                 const currentVersion = document.getElementById('currentVersion');
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     // ==================== 摄像头设置禁用 ====================
-    function disableCameraSettings() {
+    function settings_hide_camera() {
         const cameraSettingItems = [
             document.querySelector('#cameraSelect')?.closest('.setting-item'),
             document.querySelector('#cameraResolutionSelect')?.closest('.setting-item'),
@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     // ==================== 文档扫描设置禁用 ====================
-    function disableDocScanSettings() {
+    function settings_hide_doc_scan() {
         const docScanSettingItems = [
             document.querySelector('#showDocScanButtonToggle')?.closest('.setting-item'),
             document.querySelector('#scanQualitySelect')?.closest('.setting-item'),
@@ -111,11 +111,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     /**
      * 从后端加载设置并更新UI
      */
-    async function loadSettings() {
+    async function settings_load_all() {
         if (window.__TAURI__) {
             try {
                 const { invoke } = window.__TAURI__.core;
-                const settings = await invoke('get_settings');
+                const settings = await invoke('settings_fetch_all');
                 
                 const selectSelected = document.getElementById('selectSelected');
                 const languageOptions = document.querySelectorAll('#selectOptions .select-option');
@@ -135,7 +135,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const resolutionOptionsContainer = document.getElementById('resolutionOptions');
                 
                 if (resolutionSelected && resolutionOptionsContainer) {
-                    const availableResolutions = await invoke('get_available_resolutions');
+                    const availableResolutions = await invoke('resolution_fetch_available');
                     
                     resolutionOptionsContainer.innerHTML = '';
                     
@@ -193,20 +193,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                         cameraOptionsContainer.innerHTML = '';
                         
                         if (!hasCameraPermission) {
-                            cameraSelected.textContent = window.i18n?.t('settings.noCameraPermission') || '无摄像头权限';
+                            cameraSelected.textContent = window.i18n?.format_translate('settings.noCameraPermission') || '无摄像头权限';
                             cameraResolutionSelected.textContent = '-';
-                            disableCameraSettings();
-                            disableDocScanSettings();
+                            settings_hide_camera();
+                            settings_hide_doc_scan();
                             if (requestCameraPermissionItem && btnRequestCameraPermission) {
                                 requestCameraPermissionItem.style.display = 'flex';
-                                btnRequestCameraPermission.textContent = window.i18n?.t('settings.requestCameraPermission') || '获取摄像头权限';
+                                btnRequestCameraPermission.textContent = window.i18n?.format_translate('settings.requestCameraPermission') || '获取摄像头权限';
                                 btnRequestCameraPermission.dataset.mode = 'request';
                             }
                         } else if (videoDevices.length === 0) {
-                            cameraSelected.textContent = window.i18n?.t('settings.noCameraDetected') || '未检测到摄像头';
+                            cameraSelected.textContent = window.i18n?.format_translate('settings.noCameraDetected') || '未检测到摄像头';
                             cameraResolutionSelected.textContent = '-';
-                            disableCameraSettings();
-                            disableDocScanSettings();
+                            settings_hide_camera();
+                            settings_hide_doc_scan();
                             if (requestCameraPermissionItem && btnRequestCameraPermission) {
                                 requestCameraPermissionItem.style.display = 'none';
                             }
@@ -216,12 +216,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 option.className = 'select-option';
                                 option.dataset.value = device.deviceId;
                                 
-                                const cameraText = window.i18n?.t('camera.camera') || '摄像头';
+                                const cameraText = window.i18n?.format_translate('camera.camera') || '摄像头';
                                 let label = device.label || `${cameraText} ${index + 1}`;
                                 if (label.includes('back') || label.includes('后置') || label.includes('rear')) {
-                                    label = `${window.i18n?.t('camera.rearCamera') || '后置'}: ${label}`;
+                                    label = `${window.i18n?.format_translate('camera.rearCamera') || '后置'}: ${label}`;
                                 } else if (label.includes('front') || label.includes('前置') || label.includes('user')) {
-                                    label = `${window.i18n?.t('camera.frontCamera') || '前置'}: ${label}`;
+                                    label = `${window.i18n?.format_translate('camera.frontCamera') || '前置'}: ${label}`;
                                 }
                                 
                                 option.textContent = label;
@@ -255,15 +255,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                             
                             if (requestCameraPermissionItem && btnRequestCameraPermission) {
                                 requestCameraPermissionItem.style.display = 'flex';
-                                btnRequestCameraPermission.textContent = window.i18n?.t('settings.revokeCameraPermission') || '撤销授权';
+                                btnRequestCameraPermission.textContent = window.i18n?.format_translate('settings.revokeCameraPermission') || '撤销授权';
                                 btnRequestCameraPermission.dataset.mode = 'revoke';
                             }
                         }
                     } catch (error) {
                         console.error('获取摄像头列表失败:', error);
-                        cameraSelected.textContent = window.i18n?.t('settings.getFailed') || '获取失败';
+                        cameraSelected.textContent = window.i18n?.format_translate('settings.getFailed') || '获取失败';
                         cameraResolutionSelected.textContent = '-';
-                        disableCameraSettings();
+                        settings_hide_camera();
                     }
                 }
                 
@@ -273,7 +273,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const selectedCameraOption = cameraOptionsContainer.querySelector('.select-option.selected');
                     const selectedCameraId = selectedCameraOption ? selectedCameraOption.dataset.value : null;
                     try {
-                        await updateCameraResolutionOptions(selectedCameraId, settings.cameraWidth, settings.cameraHeight);
+                        await settings_update_camera_resolution_options(selectedCameraId, settings.cameraWidth, settings.cameraHeight);
                     } catch (e) {
                         console.error('初始化分辨率选择失败:', e);
                     }
@@ -297,25 +297,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 
                 // 画笔颜色设置
-                const defaultColors = [
+                const DEFAULT_COLORS = [
                     '#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4',
                     '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#f43f5e',
                     '#14b8a6', '#64748b', '#1e293b', '#000000', '#ffffff'
                 ];
-                const savedColors = settings.penColors || defaultColors;
+                const savedColors = settings.penColors || DEFAULT_COLORS;
                 
                 // 颜色格式转换函数
-                function colorToHex(color) {
+                function settings_calc_color_to_hex(color) {
                     if (typeof color === 'string') {
                         return color;
                     }
                     if (typeof color === 'object' && color.r !== undefined) {
-                        return rgbToHex(color.r, color.g, color.b);
+                        return settings_calc_rgb_to_hex(color.r, color.g, color.b);
                     }
                     return '#000000';
                 }
                 
-                function rgbToHex(r, g, b) {
+                function settings_calc_rgb_to_hex(r, g, b) {
                     return '#' + [r, g, b].map(x => {
                         const hex = x.toString(16);
                         return hex.length === 1 ? '0' + hex : hex;
@@ -325,8 +325,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 for (let i = 1; i <= 15; i++) {
                     const colorBtn = document.querySelector(`.color-edit-item[data-index="${i - 1}"] .color-edit-btn`);
                     if (colorBtn) {
-                        const color = savedColors[i - 1] || defaultColors[i - 1];
-                        const hexColor = colorToHex(color);
+                        const color = savedColors[i - 1] || DEFAULT_COLORS[i - 1];
+                        const hexColor = settings_calc_color_to_hex(color);
                         colorBtn.style.backgroundColor = hexColor;
                         colorBtn.dataset.color = hexColor;
                     }
@@ -336,7 +336,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const mirrorToggle = document.getElementById('mirrorToggle');
                 if (mirrorToggle) {
                     try {
-                        const isMirrored = await invoke('get_mirror_state');
+                        const isMirrored = await invoke('mirror_fetch_state');
                         mirrorToggle.checked = isMirrored;
                     } catch (error) {
                         console.error('获取镜像状态失败:', error);
@@ -384,7 +384,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         btn.classList.toggle('active', btn.dataset.value === mode);
                     });
                     if (window.batchDrawManager) {
-                        window.batchDrawManager.setFrameRateMode(mode);
+                        window.batchDrawManager.batch_draw_update_frame_rate(mode);
                     }
                 }
                 
@@ -478,7 +478,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const assocPdf = document.getElementById('assocPdf');
                 if (assocPdf) {
                     try {
-                        const isDefault = await invoke('check_pdf_default_app');
+                        const isDefault = await invoke('filetype_validate_pdf_default');
                         
                         if (isDefault) {
                             assocPdf.checked = settings.fileAssociations === true;
@@ -486,7 +486,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             assocPdf.checked = false;
                             
                             if (settings.fileAssociations === true) {
-                                await saveSettings({ fileAssociations: false });
+                                await settings_save_all_local({ fileAssociations: false });
                             }
                         }
                     } catch (error) {
@@ -521,12 +521,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         return {};
     }
     
-    async function saveSettings(settings) {
+    async function settings_save_all_local(settings) {
         if (window.__TAURI__) {
             try {
                 const { invoke } = window.__TAURI__.core;
                 const { emit } = window.__TAURI__.event;
-                await invoke('save_settings', { settings });
+                await invoke('settings_save_all', { settings });
                 
                 await emit('settings-changed', settings);
                 
@@ -539,7 +539,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return false;
     }
     
-    async function getSupportedResolutions(deviceId) {
+    async function settings_fetch_supported_resolutions(deviceId) {
         const commonResolutions = [
             { w: 640, h: 480, label: '640 x 480 (VGA)', aspectRatio: '4:3' },
             { w: 800, h: 600, label: '800 x 600 (SVGA)', aspectRatio: '4:3' },
@@ -576,7 +576,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
             
-            const maxText = window.i18n?.t('settings.maximum') || '最大';
+            const maxText = window.i18n?.format_translate('settings.maximum') || '最大';
             supportedResolutions.push({
                 w: maxWidth,
                 h: maxHeight,
@@ -608,7 +608,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return uniqueResolutions.sort((a, b) => (b.w * b.h) - (a.w * a.h));
     }
     
-    async function updateCameraResolutionOptions(deviceId, savedWidth, savedHeight) {
+    async function settings_update_camera_resolution_options(deviceId, savedWidth, savedHeight) {
         const cameraResolutionOptionsContainer = document.getElementById('cameraResolutionOptions');
         const cameraResolutionSelected = document.getElementById('cameraResolutionSelected');
         
@@ -616,10 +616,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         cameraResolutionOptionsContainer.innerHTML = '';
         
-        const resolutions = await getSupportedResolutions(deviceId);
+        const resolutions = await settings_fetch_supported_resolutions(deviceId);
         
         if (resolutions.length === 0) {
-            cameraResolutionSelected.textContent = window.i18n?.t('settings.cannotGet') || '无法获取';
+            cameraResolutionSelected.textContent = window.i18n?.format_translate('settings.cannotGet') || '无法获取';
             return false;
         }
         
@@ -659,9 +659,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         return true;
     }
     
-    loadAppVersion();
-    loadSettings().then(() => {
-        setupResolutionOptions();
+    settings_load_version();
+    settings_load_all().then(() => {
+        settings_setup_resolution_options();
     });
     
     const languageSelect = document.getElementById('languageSelect');
@@ -683,7 +683,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 languageSelect.classList.remove('open');
                 
-                const saved = await saveSettings({ language: value });
+                const saved = await settings_save_all_local({ language: value });
                 
                 if (saved) {
                     const restartModal = document.getElementById('restartModal');
@@ -691,7 +691,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         restartModal.classList.add('active');
                     }
                 } else {
-                    showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', window.i18n?.t('settings.saveFailedRetry') || '保存设置失败，请重试', 'error');
+                    settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', window.i18n?.format_translate('settings.saveFailedRetry') || '保存设置失败，请重试', 'error');
                 }
             });
         });
@@ -718,7 +718,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
     
-    function setupResolutionOptions() {
+    function settings_setup_resolution_options() {
         const resolutionOptions = document.querySelectorAll('#resolutionOptions .select-option');
         
         resolutionOptions.forEach(option => {
@@ -732,20 +732,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 resolutionSelect.classList.remove('open');
                 
-                const saved = await saveSettings({ width, height });
+                const saved = await settings_save_all_local({ width, height });
                 
                 if (saved) {
                     // 显示重启提示
                     const restartModal = document.getElementById('restartModal');
                     const modalMessage = restartModal?.querySelector('.modal-message');
                     if (modalMessage) {
-                        modalMessage.textContent = window.i18n?.t('settings.resolutionChanged') || '分辨率设置已更改，需要重启应用才能生效。';
+                        modalMessage.textContent = window.i18n?.format_translate('settings.resolutionChanged') || '分辨率设置已更改，需要重启应用才能生效。';
                     }
                     if (restartModal) {
                         restartModal.classList.add('active');
                     }
                 } else {
-                    showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', window.i18n?.t('settings.saveFailedRetry') || '保存设置失败，请重试', 'error');
+                    settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', window.i18n?.format_translate('settings.saveFailedRetry') || '保存设置失败，请重试', 'error');
                 }
             });
         });
@@ -779,14 +779,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             cameraSelect.classList.remove('open');
             
             try {
-                const saved = await saveSettings({ defaultCamera: value });
+                const saved = await settings_save_all_local({ defaultCamera: value });
                 
                 if (saved) {
                     const currentResolutionOption = document.querySelector('#cameraResolutionOptions .select-option.selected');
                     const currentWidth = currentResolutionOption ? parseInt(currentResolutionOption.dataset.width) : null;
                     const currentHeight = currentResolutionOption ? parseInt(currentResolutionOption.dataset.height) : null;
                     
-                    const success = await updateCameraResolutionOptions(value, currentWidth, currentHeight);
+                    const success = await settings_update_camera_resolution_options(value, currentWidth, currentHeight);
                     
                     if (success) {
                         const newResolutionOption = document.querySelector('#cameraResolutionOptions .select-option.selected');
@@ -794,16 +794,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                             const newWidth = parseInt(newResolutionOption.dataset.width);
                             const newHeight = parseInt(newResolutionOption.dataset.height);
                             if (newWidth && newHeight) {
-                                await saveSettings({ cameraWidth: newWidth, cameraHeight: newHeight });
+                                await settings_save_all_local({ cameraWidth: newWidth, cameraHeight: newHeight });
                             }
                         }
                     }
                 } else {
-                    showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', window.i18n?.t('settings.saveFailedRetry') || '保存设置失败，请重试', 'error');
+                    settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', window.i18n?.format_translate('settings.saveFailedRetry') || '保存设置失败，请重试', 'error');
                 }
             } catch (error) {
                 console.error('切换摄像头失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', String(error), 'error');
             }
         });
     }
@@ -838,10 +838,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             cameraResolutionSelect.classList.remove('open');
             
             try {
-                await saveSettings({ cameraWidth: width, cameraHeight: height });
+                await settings_save_all_local({ cameraWidth: width, cameraHeight: height });
             } catch (error) {
                 console.error('保存分辨率设置失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', String(error), 'error');
             }
         });
     }
@@ -874,7 +874,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             pdfScaleSelect.classList.remove('open');
             
-            await saveSettings({ pdfScale: value });
+            await settings_save_all_local({ pdfScale: value });
         });
     }
     
@@ -890,41 +890,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     const colorPickerConfirm = document.getElementById('colorPickerConfirm');
     const colorPickerCancel = document.getElementById('colorPickerCancel');
     
-    let currentColorIndex = 0;
-    let currentHue = 0;
-    let currentSaturation = 100;
-    let currentValue = 100;
-    let colorPickerOverlay = null;
+    let current_color_index = 0;
+    let current_hue = 0;
+    let current_saturation = 100;
+    let current_value = 100;
+    let color_picker_overlay = null;
     
-    const presetColors = [
+    const PRESET_COLORS = [
         '#e74c3c', '#e91e63', '#9b59b6', '#673ab7',
         '#3498db', '#00bcd4', '#1abc9c', '#2ecc71',
         '#8bc34a', '#f39c12', '#ff5722', '#795548',
         '#34495e', '#000000', '#ffffff'
     ];
     
-    function initColorPickerPresets() {
+    function settings_init_color_picker_presets() {
         if (!colorPickerPresets) return;
         colorPickerPresets.innerHTML = '';
-        presetColors.forEach(color => {
+        PRESET_COLORS.forEach(color => {
             const preset = document.createElement('div');
             preset.className = 'color-picker-preset';
             preset.style.backgroundColor = color;
             preset.addEventListener('click', () => {
-                const rgb = hexToRgb(color);
+                const rgb = settings_calc_hex_to_rgb(color);
                 if (rgb) {
-                    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-                    currentHue = hsv.h;
-                    currentSaturation = hsv.s;
-                    currentValue = hsv.v;
-                    updateColorPickerUI();
+                    const hsv = settings_calc_rgb_to_hsv(rgb.r, rgb.g, rgb.b);
+                    current_hue = hsv.h;
+                    current_saturation = hsv.s;
+                    current_value = hsv.v;
+                    settings_update_color_picker_ui();
                 }
             });
             colorPickerPresets.appendChild(preset);
         });
     }
     
-    function hsvToRgb(h, s, v) {
+    function settings_calc_hsv_to_rgb(h, s, v) {
         s /= 100;
         v /= 100;
         const c = v * s;
@@ -944,7 +944,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     }
     
-    function rgbToHsv(r, g, b) {
+    function settings_calc_rgb_to_hsv(r, g, b) {
         r /= 255; g /= 255; b /= 255;
         const max = Math.max(r, g, b), min = Math.min(r, g, b);
         let h = 0, s = max === 0 ? 0 : (max - min) / max, v = max;
@@ -957,14 +957,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         return { h, s: s * 100, v: v * 100 };
     }
     
-    function rgbToHex(r, g, b) {
+    function settings_calc_rgb_to_hex(r, g, b) {
         return '#' + [r, g, b].map(x => {
             const hex = x.toString(16);
             return hex.length === 1 ? '0' + hex : hex;
         }).join('');
     }
     
-    function hexToRgb(hex) {
+    function settings_calc_hex_to_rgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         return result ? {
             r: parseInt(result[1], 16),
@@ -973,30 +973,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         } : null;
     }
     
-    function getCurrentHexColor() {
-        const rgb = hsvToRgb(currentHue, currentSaturation, currentValue);
-        return rgbToHex(rgb.r, rgb.g, rgb.b);
+    function settings_calc_current_hex_color() {
+        const rgb = settings_calc_hsv_to_rgb(current_hue, current_saturation, current_value);
+        return settings_calc_rgb_to_hex(rgb.r, rgb.g, rgb.b);
     }
     
-    function updateColorPickerUI() {
-        const rgb = hsvToRgb(currentHue, currentSaturation, currentValue);
-        const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+    function settings_update_color_picker_ui() {
+        const rgb = settings_calc_hsv_to_rgb(current_hue, current_saturation, current_value);
+        const hex = settings_calc_rgb_to_hex(rgb.r, rgb.g, rgb.b);
         
         if (colorPickerSVCursor) {
-            const x = (currentSaturation / 100) * 240;
-            const y = (1 - currentValue / 100) * 180;
+            const x = (current_saturation / 100) * 240;
+            const y = (1 - current_value / 100) * 180;
             colorPickerSVCursor.style.left = x + 'px';
             colorPickerSVCursor.style.top = y + 'px';
         }
         
         if (colorPickerHueCursor) {
-            const hueX = (currentHue / 360) * 240;
+            const hueX = (current_hue / 360) * 240;
             colorPickerHueCursor.style.left = hueX + 'px';
         }
         
         if (colorPickerSV) {
-            const hueRgb = hsvToRgb(currentHue, 100, 100);
-            const hueHex = rgbToHex(hueRgb.r, hueRgb.g, hueRgb.b);
+            const hueRgb = settings_calc_hsv_to_rgb(current_hue, 100, 100);
+            const hueHex = settings_calc_rgb_to_hex(hueRgb.r, hueRgb.g, hueRgb.b);
             colorPickerSV.style.backgroundColor = hueHex;
         }
         
@@ -1009,97 +1009,97 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    function openColorPicker(index) {
-        currentColorIndex = index;
+    function settings_show_color_picker(index) {
+        current_color_index = index;
         const colorBtn = document.querySelector(`.color-edit-item[data-index="${index}"] .color-edit-btn`);
         if (colorBtn) {
             const hex = colorBtn.dataset.color || '#3498db';
-            const rgb = hexToRgb(hex);
+            const rgb = settings_calc_hex_to_rgb(hex);
             if (rgb) {
-                const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-                currentHue = hsv.h;
-                currentSaturation = hsv.s;
-                currentValue = hsv.v;
+                const hsv = settings_calc_rgb_to_hsv(rgb.r, rgb.g, rgb.b);
+                current_hue = hsv.h;
+                current_saturation = hsv.s;
+                current_value = hsv.v;
             }
         }
         
-        updateColorPickerUI();
-        initColorPickerPresets();
+        settings_update_color_picker_ui();
+        settings_init_color_picker_presets();
         
         if (colorPickerPopup) {
             colorPickerPopup.classList.add('active');
         }
         
-        if (!colorPickerOverlay) {
-            colorPickerOverlay = document.createElement('div');
-            colorPickerOverlay.className = 'color-picker-overlay';
-            colorPickerOverlay.addEventListener('click', closeColorPicker);
-            document.body.appendChild(colorPickerOverlay);
+        if (!color_picker_overlay) {
+            color_picker_overlay = document.createElement('div');
+            color_picker_overlay.className = 'color-picker-overlay';
+            color_picker_overlay.addEventListener('click', settings_hide_color_picker);
+            document.body.appendChild(color_picker_overlay);
         }
-        colorPickerOverlay.style.display = 'block';
+        color_picker_overlay.style.display = 'block';
     }
     
-    function closeColorPicker() {
+    function settings_hide_color_picker() {
         if (colorPickerPopup) {
             colorPickerPopup.classList.remove('active');
         }
-        if (colorPickerOverlay) {
-            colorPickerOverlay.style.display = 'none';
+        if (color_picker_overlay) {
+            color_picker_overlay.style.display = 'none';
         }
     }
     
-    function handleSVDrag(e) {
+    function settings_handle_sv_drag(e) {
         if (!colorPickerSV) return;
         const rect = colorPickerSV.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         let x = Math.max(0, Math.min(clientX - rect.left, rect.width));
         let y = Math.max(0, Math.min(clientY - rect.top, rect.height));
-        currentSaturation = (x / rect.width) * 100;
-        currentValue = (1 - y / rect.height) * 100;
-        updateColorPickerUI();
+        current_saturation = (x / rect.width) * 100;
+        current_value = (1 - y / rect.height) * 100;
+        settings_update_color_picker_ui();
     }
     
-    function handleHueDrag(e) {
+    function settings_handle_hue_drag(e) {
         if (!colorPickerHue) return;
         const rect = colorPickerHue.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         let x = Math.max(0, Math.min(clientX - rect.left, rect.width));
-        currentHue = (x / rect.width) * 360;
-        updateColorPickerUI();
+        current_hue = (x / rect.width) * 360;
+        settings_update_color_picker_ui();
     }
     
     if (colorPickerSV) {
-        let svDragging = false;
-        colorPickerSV.addEventListener('mousedown', (e) => { svDragging = true; handleSVDrag(e); });
-        colorPickerSV.addEventListener('touchstart', (e) => { svDragging = true; handleSVDrag(e); }, { passive: true });
-        document.addEventListener('mousemove', (e) => { if (svDragging) handleSVDrag(e); });
-        document.addEventListener('touchmove', (e) => { if (svDragging) handleSVDrag(e); }, { passive: true });
-        document.addEventListener('mouseup', () => { svDragging = false; });
-        document.addEventListener('touchend', () => { svDragging = false; });
+        let is_sv_dragging = false;
+        colorPickerSV.addEventListener('mousedown', (e) => { is_sv_dragging = true; settings_handle_sv_drag(e); });
+        colorPickerSV.addEventListener('touchstart', (e) => { is_sv_dragging = true; settings_handle_sv_drag(e); }, { passive: true });
+        document.addEventListener('mousemove', (e) => { if (is_sv_dragging) settings_handle_sv_drag(e); });
+        document.addEventListener('touchmove', (e) => { if (is_sv_dragging) settings_handle_sv_drag(e); }, { passive: true });
+        document.addEventListener('mouseup', () => { is_sv_dragging = false; });
+        document.addEventListener('touchend', () => { is_sv_dragging = false; });
     }
     
     if (colorPickerHue) {
-        let hueDragging = false;
-        colorPickerHue.addEventListener('mousedown', (e) => { hueDragging = true; handleHueDrag(e); });
-        colorPickerHue.addEventListener('touchstart', (e) => { hueDragging = true; handleHueDrag(e); }, { passive: true });
-        document.addEventListener('mousemove', (e) => { if (hueDragging) handleHueDrag(e); });
-        document.addEventListener('touchmove', (e) => { if (hueDragging) handleHueDrag(e); }, { passive: true });
-        document.addEventListener('mouseup', () => { hueDragging = false; });
-        document.addEventListener('touchend', () => { hueDragging = false; });
+        let is_hue_dragging = false;
+        colorPickerHue.addEventListener('mousedown', (e) => { is_hue_dragging = true; settings_handle_hue_drag(e); });
+        colorPickerHue.addEventListener('touchstart', (e) => { is_hue_dragging = true; settings_handle_hue_drag(e); }, { passive: true });
+        document.addEventListener('mousemove', (e) => { if (is_hue_dragging) settings_handle_hue_drag(e); });
+        document.addEventListener('touchmove', (e) => { if (is_hue_dragging) settings_handle_hue_drag(e); }, { passive: true });
+        document.addEventListener('mouseup', () => { is_hue_dragging = false; });
+        document.addEventListener('touchend', () => { is_hue_dragging = false; });
     }
     
     if (colorPickerInput) {
         colorPickerInput.addEventListener('input', () => {
             const hex = colorPickerInput.value;
             if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
-                const rgb = hexToRgb(hex);
+                const rgb = settings_calc_hex_to_rgb(hex);
                 if (rgb) {
-                    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-                    currentHue = hsv.h;
-                    currentSaturation = hsv.s;
-                    currentValue = hsv.v;
-                    updateColorPickerUI();
+                    const hsv = settings_calc_rgb_to_hsv(rgb.r, rgb.g, rgb.b);
+                    current_hue = hsv.h;
+                    current_saturation = hsv.s;
+                    current_value = hsv.v;
+                    settings_update_color_picker_ui();
                 }
             }
         });
@@ -1107,8 +1107,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     if (colorPickerConfirm) {
         colorPickerConfirm.addEventListener('click', async () => {
-            const hex = getCurrentHexColor();
-            const colorBtn = document.querySelector(`.color-edit-item[data-index="${currentColorIndex}"] .color-edit-btn`);
+            const hex = settings_calc_current_hex_color();
+            const colorBtn = document.querySelector(`.color-edit-item[data-index="${current_color_index}"] .color-edit-btn`);
             if (colorBtn) {
                 colorBtn.style.backgroundColor = hex;
                 colorBtn.dataset.color = hex;
@@ -1118,17 +1118,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             for (let i = 0; i < 15; i++) {
                 const btn = document.querySelector(`.color-edit-item[data-index="${i}"] .color-edit-btn`);
                 const hexColor = btn ? btn.dataset.color : '#000000';
-                const rgb = hexToRgb(hexColor);
+                const rgb = settings_calc_hex_to_rgb(hexColor);
                 colors.push(rgb || { r: 0, g: 0, b: 0 });
             }
-            await saveSettings({ penColors: colors });
+            await settings_save_all_local({ penColors: colors });
             
-            closeColorPicker();
+            settings_hide_color_picker();
         });
     }
     
     if (colorPickerCancel) {
-        colorPickerCancel.addEventListener('click', closeColorPicker);
+        colorPickerCancel.addEventListener('click', settings_hide_color_picker);
     }
     
     document.querySelectorAll('.color-edit-btn').forEach(btn => {
@@ -1136,7 +1136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const item = btn.closest('.color-edit-item');
             if (item) {
                 const index = parseInt(item.dataset.index);
-                openColorPicker(index);
+                settings_show_color_picker(index);
             }
         });
     });
@@ -1147,7 +1147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         mirrorToggle.addEventListener('change', async () => {
             try {
                 const { invoke } = window.__TAURI__.core;
-                await invoke('set_mirror_state', { enabled: mirrorToggle.checked });
+                await invoke('mirror_update_state', { enabled: mirrorToggle.checked });
             } catch (error) {
                 console.error('设置镜像状态失败:', error);
             }
@@ -1174,7 +1174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 denoiseFrameSelect.classList.remove('open');
                 
-                await saveSettings({ denoiseFrameCount: parseInt(value) });
+                await settings_save_all_local({ denoiseFrameCount: parseInt(value) });
             });
         });
     }
@@ -1199,7 +1199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 denoiseStrengthSelect.classList.remove('open');
                 
-                await saveSettings({ denoiseStrength: value });
+                await settings_save_all_local({ denoiseStrength: value });
             });
         });
     }
@@ -1213,9 +1213,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const mode = btn.dataset.value;
                 frameRateModeGroup.dataset.active = mode;
                 buttons.forEach(b => b.classList.toggle('active', b === btn));
-                await saveSettings({ frameRateMode: mode });
+                await settings_save_all_local({ frameRateMode: mode });
                 if (window.batchDrawManager) {
-                    window.batchDrawManager.setFrameRateMode(mode);
+                    window.batchDrawManager.batch_draw_update_frame_rate(mode);
                 }
             });
         });
@@ -1225,7 +1225,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const showDocScanButtonToggle = document.getElementById('showDocScanButtonToggle');
     if (showDocScanButtonToggle) {
         showDocScanButtonToggle.addEventListener('change', async () => {
-            await saveSettings({ showDocScanButton: showDocScanButtonToggle.checked });
+            await settings_save_all_local({ showDocScanButton: showDocScanButtonToggle.checked });
         });
     }
     
@@ -1256,7 +1256,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             scanQualitySelect.classList.remove('open');
             
-            await saveSettings({ scanQuality: value });
+            await settings_save_all_local({ scanQuality: value });
         });
     }
     
@@ -1287,7 +1287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             scanModeSelect.classList.remove('open');
             
-            await saveSettings({ scanMode: value });
+            await settings_save_all_local({ scanMode: value });
         });
     }
     
@@ -1318,7 +1318,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             enhanceModeSelect.classList.remove('open');
             
-            await saveSettings({ enhanceMode: value });
+            await settings_save_all_local({ enhanceMode: value });
         });
     }
     
@@ -1342,7 +1342,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 themeSelect.classList.remove('open');
                 
-                const saved = await saveSettings({ theme: value });
+                const saved = await settings_save_all_local({ theme: value });
                 if (saved) {
                     const restartModal = document.getElementById('restartModal');
                     if (restartModal) {
@@ -1379,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 defaultRotationSelect.classList.remove('open');
                 
-                await saveSettings({ defaultRotation: value });
+                await settings_save_all_local({ defaultRotation: value });
             });
         });
         
@@ -1398,35 +1398,35 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             if (assocPdf.checked) {
                 try {
-                    await invoke('set_file_type_icons');
-                    await saveSettings({ fileAssociations: true });
-                    showSettingsDialog(
-                        window.i18n?.t('common.success') || '成功',
-                        window.i18n?.t('settings.pdfDefaultSetSuccess') || 'PDF 已设置为默认打开方式',
+                    await invoke('filetype_set_icons');
+                    await settings_save_all_local({ fileAssociations: true });
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.success') || '成功',
+                        window.i18n?.format_translate('settings.pdfDefaultSetSuccess') || 'PDF 已设置为默认打开方式',
                         'success'
                     );
                 } catch (e) {
                     console.error('设置 PDF 默认打开方式失败:', e);
                     assocPdf.checked = false;
-                    showSettingsDialog(
-                        window.i18n?.t('common.error') || '错误',
-                        window.i18n?.t('settings.pdfDefaultSetFailed') || '设置 PDF 默认打开方式失败，请手动在系统设置中设置',
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.error') || '错误',
+                        window.i18n?.format_translate('settings.pdfDefaultSetFailed') || '设置 PDF 默认打开方式失败，请手动在系统设置中设置',
                         'error'
                     );
                 }
             } else {
                 try {
-                    await invoke('remove_file_type_icons');
-                    await saveSettings({ fileAssociations: false });
-                    showSettingsDialog(
-                        window.i18n?.t('common.success') || '成功',
-                        window.i18n?.t('settings.pdfDefaultRemoved') || '已取消 PDF 默认打开方式设置',
+                    await invoke('filetype_delete_icons');
+                    await settings_save_all_local({ fileAssociations: false });
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.success') || '成功',
+                        window.i18n?.format_translate('settings.pdfDefaultRemoved') || '已取消 PDF 默认打开方式设置',
                         'success'
                     );
                 } catch (e) {
                     console.error('取消 PDF 默认打开方式失败:', e);
-                    showSettingsDialog(
-                        window.i18n?.t('common.error') || '错误',
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.error') || '错误',
                         String(e),
                         'error'
                     );
@@ -1442,35 +1442,35 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             if (assocWord.checked) {
                 try {
-                    await invoke('set_file_type_icons');
-                    await saveSettings({ wordAssociations: true });
-                    showSettingsDialog(
-                        window.i18n?.t('common.success') || '成功',
-                        window.i18n?.t('settings.wordDefaultSetSuccess') || 'Word 文档已设置为默认打开方式',
+                    await invoke('filetype_set_icons');
+                    await settings_save_all_local({ wordAssociations: true });
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.success') || '成功',
+                        window.i18n?.format_translate('settings.wordDefaultSetSuccess') || 'Word 文档已设置为默认打开方式',
                         'success'
                     );
                 } catch (e) {
                     console.error('设置 Word 默认打开方式失败:', e);
                     assocWord.checked = false;
-                    showSettingsDialog(
-                        window.i18n?.t('common.error') || '错误',
-                        window.i18n?.t('settings.wordDefaultSetFailed') || '设置 Word 默认打开方式失败，请手动在系统设置中设置',
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.error') || '错误',
+                        window.i18n?.format_translate('settings.wordDefaultSetFailed') || '设置 Word 默认打开方式失败，请手动在系统设置中设置',
                         'error'
                     );
                 }
             } else {
                 try {
-                    await invoke('remove_file_type_icons');
-                    await saveSettings({ wordAssociations: false });
-                    showSettingsDialog(
-                        window.i18n?.t('common.success') || '成功',
-                        window.i18n?.t('settings.wordDefaultRemoved') || '已取消 Word 文档默认打开方式设置',
+                    await invoke('filetype_delete_icons');
+                    await settings_save_all_local({ wordAssociations: false });
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.success') || '成功',
+                        window.i18n?.format_translate('settings.wordDefaultRemoved') || '已取消 Word 文档默认打开方式设置',
                         'success'
                     );
                 } catch (e) {
                     console.error('取消 Word 默认打开方式失败:', e);
-                    showSettingsDialog(
-                        window.i18n?.t('common.error') || '错误',
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.error') || '错误',
                         String(e),
                         'error'
                     );
@@ -1493,7 +1493,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const { save } = window.__TAURI__.dialog;
                 const { writeTextFile } = window.__TAURI__.fs;
                 
-                const settings = await invoke('get_settings');
+                const settings = await invoke('settings_fetch_all');
                 const jsonStr = JSON.stringify(settings, null, 2);
                 
                 const filePath = await save({
@@ -1507,7 +1507,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } catch (error) {
                 console.error('导出设置失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.exportFailed') || '导出失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.exportFailed') || '导出失败', String(error), 'error');
             }
         });
     }
@@ -1529,7 +1529,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const jsonStr = await readTextFile(filePath);
                     const settings = JSON.parse(jsonStr);
                     
-                    await invoke('save_settings', { settings });
+                await invoke('settings_save_all', { settings });
                     console.log('设置已导入:', filePath);
                     
                     // 重新加载页面以应用新设置
@@ -1537,7 +1537,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } catch (error) {
                 console.error('导入设置失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.importFailed') || '导入失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.importFailed') || '导入失败', String(error), 'error');
             }
         });
     }
@@ -1547,8 +1547,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const modalTitle = modalOverlay.querySelector('.modal-title');
             const modalMessage = modalOverlay.querySelector('.modal-message');
             if (modalTitle && modalMessage) {
-                modalTitle.textContent = window.i18n?.t('settings.confirmReset') || '确认重置';
-                modalMessage.textContent = window.i18n?.t('settings.resetWarning') || '确定要重置应用吗？这将删除所有设置并重启应用。';
+                modalTitle.textContent = window.i18n?.format_translate('settings.confirmReset') || '确认重置';
+                modalMessage.textContent = window.i18n?.format_translate('settings.resetWarning') || '确定要重置应用吗？这将删除所有设置并重启应用。';
             }
             modalConfirm.dataset.action = 'reset';
             modalOverlay.classList.add('active');
@@ -1572,10 +1572,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const { getCurrentWebview } = window.__TAURI__.webview;
                 const webview = getCurrentWebview();
                 await webview.clearAllBrowsingData();
-                await invoke('reset_settings');
+                await invoke('settings_delete_all');
             } catch (error) {
                 console.error('重置失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', String(error), 'error');
                 modalOverlay.classList.remove('active');
             }
         });
@@ -1585,11 +1585,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cacheSizeEl = document.getElementById('cacheSize');
     const btnClearCache = document.getElementById('btnClearCache');
     
-    async function updateCacheSize() {
+    async function settings_update_cache_size() {
         if (!window.__TAURI__) return;
         try {
             const { invoke } = window.__TAURI__.core;
-            const size = await invoke('get_cache_size');
+            const size = await invoke('cache_fetch_size');
             if (cacheSizeEl) {
                 if (size === 0) {
                     cacheSizeEl.textContent = '(0 B)';
@@ -1608,18 +1608,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    updateCacheSize();
+    settings_update_cache_size();
     
     if (btnClearCache && window.__TAURI__) {
         btnClearCache.addEventListener('click', async () => {
             try {
                 const { invoke } = window.__TAURI__.core;
-                const result = await invoke('clear_cache');
-                showSettingsDialog(window.i18n?.t('settings.clearComplete') || '清除完成', result, 'success');
-                updateCacheSize();
+                const result = await invoke('cache_delete_all');
+                settings_show_dialog(window.i18n?.format_translate('settings.clearComplete') || '清除完成', result, 'success');
+                settings_update_cache_size();
             } catch (error) {
                 console.error('清除缓存失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.clearFailed') || '清除失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.clearFailed') || '清除失败', String(error), 'error');
             }
         });
     }
@@ -1647,9 +1647,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoClearCacheSelect.classList.remove('open');
                 
                 if (days === 0) {
-                    showSettingsDialog(window.i18n?.t('common.warning') || '警告', window.i18n?.t('errors.autoClearWarning') || '若关闭自动清理可能导致C盘异常，强烈建议打开自动清理功能', 'error');
+                    settings_show_dialog(window.i18n?.format_translate('common.warning') || '警告', window.i18n?.format_translate('errors.autoClearWarning') || '若关闭自动清理可能导致C盘异常，强烈建议打开自动清理功能', 'error');
                 }
-                await saveSettings({ autoClearCacheDays: days });
+                await settings_save_all_local({ autoClearCacheDays: days });
             });
         });
     }
@@ -1662,13 +1662,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const { invoke } = window.__TAURI__.core;
                 const { openPath } = window.__TAURI__.opener;
                 
-                const configDir = await invoke('get_config_dir');
+                const configDir = await invoke('dir_fetch_config');
                 const logDir = configDir + '\\log';
                 
                 await openPath(logDir);
             } catch (error) {
                 console.error('打开日志目录失败:', error);
-                showSettingsDialog(window.i18n?.t('common.error') || '错误', window.i18n?.t('settings.openLogDirFailed') || '打开日志目录失败', 'error');
+                settings_show_dialog(window.i18n?.format_translate('common.error') || '错误', window.i18n?.format_translate('settings.openLogDirFailed') || '打开日志目录失败', 'error');
             }
         });
     }
@@ -1681,27 +1681,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     const downloadProgressBar = document.getElementById('downloadProgressBar');
     const downloadProgressText = document.getElementById('downloadProgressText');
     
-    async function checkDbnetModel() {
+    async function settings_validate_dbnet_model() {
         if (!window.__TAURI__) return;
         
         try {
             const { invoke } = window.__TAURI__.core;
-            const modelInfo = await invoke('get_dbnet_model_info');
+            const modelInfo = await invoke('model_fetch_dbnet_info');
             
             if (modelInfo.exists) {
-                dbnetModelStatus.textContent = window.i18n?.t('settings.modelInstalledWithSize', { size: modelInfo.size_mb.toFixed(2) }) || `已安装 (${modelInfo.size_mb.toFixed(2)} MB)`;
+                dbnetModelStatus.textContent = window.i18n?.format_translate('settings.modelInstalledWithSize', { size: modelInfo.size_mb.toFixed(2) }) || `已安装 (${modelInfo.size_mb.toFixed(2)} MB)`;
                 dbnetModelStatus.style.color = '#27ae60';
                 btnDownloadDbnetModel.style.display = 'none';
                 btnDeleteDbnetModel.style.display = 'inline-block';
             } else {
-                dbnetModelStatus.textContent = window.i18n?.t('settings.modelNotInstalled') || '未安装';
+                dbnetModelStatus.textContent = window.i18n?.format_translate('settings.modelNotInstalled') || '未安装';
                 dbnetModelStatus.style.color = '#e74c3c';
                 btnDownloadDbnetModel.style.display = 'inline-block';
                 btnDeleteDbnetModel.style.display = 'none';
             }
         } catch (error) {
             console.error('检查模型状态失败:', error);
-            dbnetModelStatus.textContent = window.i18n?.t('settings.modelCheckFailed') || '检查失败';
+            dbnetModelStatus.textContent = window.i18n?.format_translate('settings.modelCheckFailed') || '检查失败';
             dbnetModelStatus.style.color = '#e74c3c';
         }
     }
@@ -1724,7 +1724,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     downloadProgressText.textContent = progress + '%';
                 });
                 
-                await invoke('download_dbnet_model');
+                await invoke('model_download_dbnet');
                 
                 unlisten();
                 
@@ -1732,15 +1732,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 btnDownloadDbnetModel.disabled = false;
                 btnDownloadDbnetModel.textContent = '下载';
                 
-                showSettingsDialog('成功', 'DBNet 模型下载成功！', 'success');
+                settings_show_dialog('成功', 'DBNet 模型下载成功！', 'success');
                 
-                await checkDbnetModel();
+                await settings_validate_dbnet_model();
             } catch (error) {
                 console.error('下载模型失败:', error);
                 downloadProgress.style.display = 'none';
                 btnDownloadDbnetModel.disabled = false;
                 btnDownloadDbnetModel.textContent = '下载';
-                showSettingsDialog('错误', `下载失败: ${error}`, 'error');
+                settings_show_dialog('错误', `下载失败: ${error}`, 'error');
             }
         });
     }
@@ -1753,14 +1753,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const confirmed = confirm('确定要删除 DBNet 模型吗？删除后需要重新下载。');
                 if (!confirmed) return;
                 
-                await invoke('delete_dbnet_model');
+                await invoke('model_delete_dbnet');
                 
-                showSettingsDialog('成功', 'DBNet 模型已删除！', 'success');
+                settings_show_dialog('成功', 'DBNet 模型已删除！', 'success');
                 
-                await checkDbnetModel();
+                await settings_validate_dbnet_model();
             } catch (error) {
                 console.error('删除模型失败:', error);
-                showSettingsDialog('错误', `删除失败: ${error}`, 'error');
+                settings_show_dialog('错误', `删除失败: ${error}`, 'error');
             }
         });
     }
@@ -1773,27 +1773,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     const uvdocDownloadProgressBar = document.getElementById('uvdocDownloadProgressBar');
     const uvdocDownloadProgressText = document.getElementById('uvdocDownloadProgressText');
     
-    async function checkUvdocModel() {
+    async function settings_validate_uvdoc_model() {
         if (!window.__TAURI__) return;
         
         try {
             const { invoke } = window.__TAURI__.core;
-            const info = await invoke('get_uvdoc_model_info');
+            const info = await invoke('model_fetch_uvdoc_info');
             
             if (info.exists) {
-                uvdocModelStatus.textContent = window.i18n?.t('settings.modelInstalledWithSize', { size: info.size_mb.toFixed(1) }) || `已安装 (${info.size_mb.toFixed(1)} MB)`;
+                uvdocModelStatus.textContent = window.i18n?.format_translate('settings.modelInstalledWithSize', { size: info.size_mb.toFixed(1) }) || `已安装 (${info.size_mb.toFixed(1)} MB)`;
                 uvdocModelStatus.style.color = '#27ae60';
                 btnDownloadUvdocModel.style.display = 'none';
                 btnDeleteUvdocModel.style.display = 'inline-block';
             } else {
-                uvdocModelStatus.textContent = window.i18n?.t('settings.modelNotInstalled') || '未安装';
+                uvdocModelStatus.textContent = window.i18n?.format_translate('settings.modelNotInstalled') || '未安装';
                 uvdocModelStatus.style.color = '#e74c3c';
                 btnDownloadUvdocModel.style.display = 'inline-block';
                 btnDeleteUvdocModel.style.display = 'none';
             }
         } catch (error) {
             console.error('检查UVDoc模型状态失败:', error);
-            uvdocModelStatus.textContent = window.i18n?.t('settings.modelCheckFailed') || '检查失败';
+            uvdocModelStatus.textContent = window.i18n?.format_translate('settings.modelCheckFailed') || '检查失败';
             uvdocModelStatus.style.color = '#e74c3c';
         }
     }
@@ -1816,7 +1816,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     uvdocDownloadProgressText.textContent = progress + '%';
                 });
                 
-                await invoke('download_uvdoc_model');
+                await invoke('model_download_uvdoc');
                 
                 unlisten();
                 
@@ -1824,15 +1824,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 btnDownloadUvdocModel.disabled = false;
                 btnDownloadUvdocModel.textContent = '下载';
                 
-                showSettingsDialog('成功', 'UVDoc 模型下载成功！', 'success');
+                settings_show_dialog('成功', 'UVDoc 模型下载成功！', 'success');
                 
-                await checkUvdocModel();
+                await settings_validate_uvdoc_model();
             } catch (error) {
                 console.error('下载UVDoc模型失败:', error);
                 uvdocDownloadProgress.style.display = 'none';
                 btnDownloadUvdocModel.disabled = false;
                 btnDownloadUvdocModel.textContent = '下载';
-                showSettingsDialog('错误', `下载失败: ${error}`, 'error');
+                settings_show_dialog('错误', `下载失败: ${error}`, 'error');
             }
         });
     }
@@ -1845,48 +1845,48 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const confirmed = confirm('确定要删除 UVDoc 模型吗？删除后需要重新下载。');
                 if (!confirmed) return;
                 
-                await invoke('delete_uvdoc_model');
+                await invoke('model_delete_uvdoc');
                 
-                showSettingsDialog('成功', 'UVDoc 模型已删除！', 'success');
+                settings_show_dialog('成功', 'UVDoc 模型已删除！', 'success');
                 
-                await checkUvdocModel();
+                await settings_validate_uvdoc_model();
             } catch (error) {
                 console.error('删除UVDoc模型失败:', error);
-                showSettingsDialog('错误', `删除失败: ${error}`, 'error');
+                settings_show_dialog('错误', `删除失败: ${error}`, 'error');
             }
         });
     }
     
-    checkUvdocModel();
+    settings_validate_uvdoc_model();
     
-    checkDbnetModel();
+    settings_validate_dbnet_model();
     
     // DexiNed 模型检查和管理
     const dexinedModelStatus = document.getElementById('dexinedModelStatus');
     const btnImportDexinedModel = document.getElementById('btnImportDexinedModel');
     const btnDeleteDexinedModel = document.getElementById('btnDeleteDexinedModel');
     
-    async function checkDexiNedModel() {
+    async function settings_validate_dexined_model() {
         if (!window.__TAURI__ || !dexinedModelStatus) return;
         
         try {
             const { invoke } = window.__TAURI__.core;
-            const exists = await invoke('check_dexined_model');
+            const exists = await invoke('model_check_dexined');
             
             if (exists) {
-                dexinedModelStatus.textContent = window.i18n?.t('settings.modelInstalled') || '已安装';
+                dexinedModelStatus.textContent = window.i18n?.format_translate('settings.modelInstalled') || '已安装';
                 dexinedModelStatus.style.color = '#27ae60';
                 if (btnImportDexinedModel) btnImportDexinedModel.style.display = 'none';
                 if (btnDeleteDexinedModel) btnDeleteDexinedModel.style.display = 'inline-block';
             } else {
-                dexinedModelStatus.textContent = window.i18n?.t('settings.modelNotInstalled') || '未安装';
+                dexinedModelStatus.textContent = window.i18n?.format_translate('settings.modelNotInstalled') || '未安装';
                 dexinedModelStatus.style.color = '#e74c3c';
                 if (btnImportDexinedModel) btnImportDexinedModel.style.display = 'inline-block';
                 if (btnDeleteDexinedModel) btnDeleteDexinedModel.style.display = 'none';
             }
         } catch (error) {
             console.error('检查 DexiNed 模型状态失败:', error);
-            dexinedModelStatus.textContent = window.i18n?.t('settings.modelCheckFailed') || '检查失败';
+            dexinedModelStatus.textContent = window.i18n?.format_translate('settings.modelCheckFailed') || '检查失败';
             dexinedModelStatus.style.color = '#e74c3c';
         }
     }
@@ -1910,19 +1910,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                     btnImportDexinedModel.disabled = true;
                     btnImportDexinedModel.textContent = '导入中...';
                     
-                    await invoke('import_dexined_model', { sourcePath: selected });
+                    await invoke('model_import_dexined', { sourcePath: selected });
                     
                     btnImportDexinedModel.disabled = false;
                     btnImportDexinedModel.textContent = '导入';
                     
-                    showSettingsDialog('成功', 'DexiNed 模型导入成功！', 'success');
-                    await checkDexiNedModel();
+                    settings_show_dialog('成功', 'DexiNed 模型导入成功！', 'success');
+                    await settings_validate_dexined_model();
                 }
             } catch (error) {
                 console.error('导入 DexiNed 模型失败:', error);
                 btnImportDexinedModel.disabled = false;
                 btnImportDexinedModel.textContent = '导入';
-                showSettingsDialog('错误', `导入失败: ${error}`, 'error');
+                settings_show_dialog('错误', `导入失败: ${error}`, 'error');
             }
         });
     }
@@ -1936,18 +1936,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const confirmed = confirm('确定要删除 DexiNed 模型吗？');
                 if (!confirmed) return;
                 
-                await invoke('delete_dexined_model');
+                await invoke('model_delete_dexined');
                 
-                showSettingsDialog('成功', 'DexiNed 模型已删除！', 'success');
-                await checkDexiNedModel();
+                settings_show_dialog('成功', 'DexiNed 模型已删除！', 'success');
+                await settings_validate_dexined_model();
             } catch (error) {
                 console.error('删除 DexiNed 模型失败:', error);
-                showSettingsDialog('错误', `删除失败: ${error}`, 'error');
+                settings_show_dialog('错误', `删除失败: ${error}`, 'error');
             }
         });
     }
     
-    checkDexiNedModel();
+    settings_validate_dexined_model();
     
     const restartModal = document.getElementById('restartModal');
     const restartLater = document.getElementById('restartLater');
@@ -1967,10 +1967,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         restartNow.addEventListener('click', async () => {
             try {
                 const { invoke } = window.__TAURI__.core;
-                await invoke('restart_app');
+                await invoke('app_restart_process');
             } catch (error) {
                 console.error('重启失败:', error);
-                showSettingsDialog(window.i18n?.t('settings.saveFailed') || '保存失败', String(error), 'error');
+                settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', String(error), 'error');
             }
         });
     }
@@ -1980,14 +1980,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     let lastFrameTime = 0;
     const frameInterval = 33; // ~30 FPS
     
-    function generateRandomColor() {
+    function settings_calc_random_color() {
         const hue = Math.floor(Math.random() * 360);
         const saturation = 55 + Math.floor(Math.random() * 25);
         const lightness = 45 + Math.floor(Math.random() * 20);
         return `hsla(${hue}, ${saturation}%, ${lightness}%, 0.6)`;
     }
     
-    function createBlobs() {
+    function settings_create_blobs() {
         if (!auroraBg) return;
         
         auroraBg.innerHTML = '';
@@ -2004,7 +2004,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const size = 400 + Math.random() * 300;
             blob.style.width = size + 'px';
             blob.style.height = size + 'px';
-            blob.style.background = generateRandomColor();
+            blob.style.background = settings_calc_random_color();
             
             auroraBg.appendChild(blob);
             
@@ -2024,9 +2024,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    function updateBlobs(currentTime) {
+    function settings_update_blobs(currentTime) {
         if (currentTime - lastFrameTime < frameInterval) {
-            animationId = requestAnimationFrame(updateBlobs);
+            animationId = requestAnimationFrame(settings_update_blobs);
             return;
         }
         lastFrameTime = currentTime;
@@ -2051,20 +2051,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             blob.element.style.transform = `translate(${blob.x}px, ${blob.y}px)`;
         });
         
-        animationId = requestAnimationFrame(updateBlobs);
+        animationId = requestAnimationFrame(settings_update_blobs);
     }
     
-    function startAurora() {
+    function settings_start_aurora() {
         if (blobs.length === 0) {
-            createBlobs();
+            settings_create_blobs();
         }
         if (!animationId) {
             lastFrameTime = 0;
-            updateBlobs(performance.now());
+            settings_update_blobs(performance.now());
         }
     }
     
-    function stopAurora() {
+    function settings_hide_aurora() {
         if (animationId) {
             cancelAnimationFrame(animationId);
             animationId = null;
@@ -2088,7 +2088,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sidebarBtns = document.querySelectorAll('.sidebar-btn');
     const pages = document.querySelectorAll('.page');
     
-    function showPage(pageId) {
+    function settings_show_page(pageId) {
         pages.forEach(page => page.classList.remove('active'));
         const targetPage = document.getElementById(pageId);
         if (targetPage) {
@@ -2096,13 +2096,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         if (auroraBg) {
-            const showAurora = window.ThemeManager?.getShowAuroraEffect?.() ?? true;
+            const showAurora = window.ThemeManager?.theme_fetch_aurora_effect?.() ?? true;
             if ((pageId === 'pageAbout' || pageId === 'pageUpdate') && showAurora) {
-                startAurora();
+                settings_start_aurora();
                 auroraBg.classList.add('active');
             } else {
                 auroraBg.classList.remove('active');
-                stopAurora();
+                settings_hide_aurora();
             }
         }
     }
@@ -2124,7 +2124,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             const pageId = pageMap[btn.id];
             if (pageId) {
-                showPage(pageId);
+                settings_show_page(pageId);
             }
         });
     });
@@ -2132,15 +2132,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnUpdate = document.getElementById('btnUpdate');
     if (btnUpdate) {
         btnUpdate.addEventListener('click', () => {
-            showPage('pageUpdate');
-            loadUpdatePage();
+            settings_show_page('pageUpdate');
+            settings_load_update_page();
         });
     }
 
     const btnBackToAbout = document.getElementById('btnBackToAbout');
     if (btnBackToAbout) {
         btnBackToAbout.addEventListener('click', () => {
-            showPage('pageAbout');
+            settings_show_page('pageAbout');
             sidebarBtns.forEach(b => b.classList.remove('active'));
             document.getElementById('btnAbout')?.classList.add('active');
         });
@@ -2173,20 +2173,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    async function loadUpdatePage() {
+    async function settings_load_update_page() {
         if (!window.__TAURI__) return;
 
         const { invoke } = window.__TAURI__.core;
-        const currentVersion = await invoke('get_app_version');
+        const currentVersion = await invoke('app_fetch_version');
         updateCurrentVersion.textContent = currentVersion;
 
-        updateReleaseNotesContent.textContent = i18n.t('settings.checkingForUpdates') || '正在检查更新...';
+        updateReleaseNotesContent.textContent = i18n.format_translate('settings.checkingForUpdates') || '正在检查更新...';
         btnCheckUpdate.disabled = true;
         btnUpdateDownload.style.display = 'none';
         updateStatus.textContent = '';
 
         try {
-            const result = await invoke('check_update');
+            const result = await invoke('update_fetch_check');
             const release = result.release;
             const currentRelease = result.current_release;
 
@@ -2200,8 +2200,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             if (!release) {
-                releaseNotes += i18n.t('settings.alreadyLatest') || '当前已是最新版本';
-                updateStatus.textContent = i18n.t('settings.alreadyLatest') || '当前已是最新版本';
+                releaseNotes += i18n.format_translate('settings.alreadyLatest') || '当前已是最新版本';
+                updateStatus.textContent = i18n.format_translate('settings.alreadyLatest') || '当前已是最新版本';
                 updateStatus.className = 'update-status status-latest';
                 latestReleaseData = null;
             } else {
@@ -2211,12 +2211,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 releaseNotes += `【最新版本: v${latestReleaseData.tag_name.replace(/^v/, '')}】\n${latestNotes}`;
 
                 const size = release.assets && release.assets.length > 0 ? release.assets[0].size : 0;
-                const sizeText = size > 0 ? formatFileSize(size) : '';
+                const sizeText = size > 0 ? settings_format_file_size(size) : '';
                 if (sizeText) {
-                    releaseNotes += `\n\n${i18n.t('settings.fileSize') || '文件大小'}: ${sizeText}`;
+                    releaseNotes += `\n\n${i18n.format_translate('settings.fileSize') || '文件大小'}: ${sizeText}`;
                 }
 
-                updateStatus.textContent = i18n.t('settings.updateAvailable') || '发现新版本';
+                updateStatus.textContent = i18n.format_translate('settings.updateAvailable') || '发现新版本';
                 updateStatus.className = 'update-status status-available';
                 btnUpdateDownload.style.display = 'inline-block';
             }
@@ -2224,15 +2224,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             updateReleaseNotesContent.textContent = releaseNotes;
         } catch (error) {
             console.error('检查更新失败:', error);
-            updateReleaseNotesContent.textContent = i18n.t('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
-            updateStatus.textContent = i18n.t('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
+            updateReleaseNotesContent.textContent = i18n.format_translate('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
+            updateStatus.textContent = i18n.format_translate('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
             updateStatus.className = 'update-status status-error';
             btnCheckUpdate.disabled = false;
             latestReleaseData = null;
         }
     }
 
-    function formatFileSize(bytes) {
+    function settings_format_file_size(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -2242,7 +2242,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (btnCheckUpdate) {
         btnCheckUpdate.addEventListener('click', async () => {
-            await loadUpdatePage();
+            await settings_load_update_page();
         });
     }
 
@@ -2258,7 +2258,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const fileName = asset.name;
 
             btnUpdateDownload.disabled = true;
-            btnUpdateDownload.textContent = i18n.t('settings.downloading') || '正在下载...';
+            btnUpdateDownload.textContent = i18n.format_translate('settings.downloading') || '正在下载...';
             updateDownloadProgress.style.display = 'block';
             updateProgressBar.style.width = '0%';
             updateProgressText.textContent = '0%';
@@ -2269,22 +2269,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const unlisten = await currentWindow.listen('update-download-progress', (event) => {
                     const progress = event.payload;
                     updateProgressBar.style.width = progress + '%';
-                    updateProgressText.textContent = i18n.t('settings.downloadingUpdate', { percent: Math.round(progress) }) || `正在下载 ${Math.round(progress)}%`;
+                    updateProgressText.textContent = i18n.format_translate('settings.downloadingUpdate', { percent: Math.round(progress) }) || `正在下载 ${Math.round(progress)}%`;
                 });
 
-                const downloadPath = await invoke('download_update', { url: downloadUrl, fileName: fileName, useMirror: useMirror });
+                const downloadPath = await invoke('update_download_file', { url: downloadUrl, fileName: fileName, useMirror: useMirror });
 
                 unlisten();
 
                 updateDownloadProgress.style.display = 'none';
                 btnUpdateDownload.style.display = 'none';
-                updateStatus.textContent = i18n.t('settings.downloadComplete') || '下载完成';
+                updateStatus.textContent = i18n.format_translate('settings.downloadComplete') || '下载完成';
                 updateStatus.className = 'update-status status-success';
 
                 const restartModal = document.getElementById('restartModal');
                 const restartModalMessage = restartModal?.querySelector('.modal-message');
                 if (restartModalMessage) {
-                    restartModalMessage.textContent = i18n.t('settings.restartToUpdate') || '更新包已下载完成，请重启应用以完成更新。';
+                    restartModalMessage.textContent = i18n.format_translate('settings.restartToUpdate') || '更新包已下载完成，请重启应用以完成更新。';
                 }
                 if (restartModal) {
                     restartModal.classList.add('active');
@@ -2293,8 +2293,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error('下载更新失败:', error);
                 updateDownloadProgress.style.display = 'none';
                 btnUpdateDownload.disabled = false;
-                btnUpdateDownload.textContent = i18n.t('settings.downloadUpdate') || '下载更新';
-                showSettingsDialog(i18n.t('settings.downloadFailed') || '下载失败', String(error), 'error');
+                btnUpdateDownload.textContent = i18n.format_translate('settings.downloadUpdate') || '下载更新';
+                settings_show_dialog(i18n.format_translate('settings.downloadFailed') || '下载失败', String(error), 'error');
             }
         });
     }
@@ -2327,8 +2327,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const modalConfirm = document.getElementById('modalConfirm');
                 
                 if (modalOverlay && modalTitle && modalMessage) {
-                    modalTitle.textContent = window.i18n?.t('settings.revokePermission') || '撤销授权';
-                    modalMessage.textContent = window.i18n?.t('settings.revokePermissionHint') || '撤销摄像头权限需要重置应用，这将删除所有设置并重启应用。确定要继续吗？';
+                    modalTitle.textContent = window.i18n?.format_translate('settings.revokePermission') || '撤销授权';
+                    modalMessage.textContent = window.i18n?.format_translate('settings.revokePermissionHint') || '撤销摄像头权限需要重置应用，这将删除所有设置并重启应用。确定要继续吗？';
                     modalOverlay.classList.add('active');
                     
                     modalConfirm.dataset.action = 'revoke-permission';
@@ -2341,9 +2341,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     location.reload();
                 } catch (error) {
                     console.error('获取摄像头权限失败:', error);
-                    showSettingsDialog(
-                        window.i18n?.t('common.error') || '错误',
-                        window.i18n?.t('settings.cameraPermissionDenied') || '无法获取摄像头权限，请在系统设置中手动授权',
+                    settings_show_dialog(
+                        window.i18n?.format_translate('common.error') || '错误',
+                        window.i18n?.format_translate('settings.cameraPermissionDenied') || '无法获取摄像头权限，请在系统设置中手动授权',
                         'error'
                     );
                 }
@@ -2351,6 +2351,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    showPage('pageApp');
+    settings_show_page('pageApp');
     document.getElementById('btnApp')?.classList.add('active');
 });

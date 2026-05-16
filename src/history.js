@@ -12,18 +12,18 @@
 
 export const MAX_HISTORY_STEPS = 50;
 
-let historyState = {
-    undoStack: [],
-    redoStack: [],
-    isExecuting: false,
-    onStateChange: null
+let history_state = {
+    undo_list: [],
+    redo_list: [],
+    is_executing: false,
+    on_state_change: null
 };
 
-export function initHistoryManager(options = {}) {
-    historyState.undoStack = [];
-    historyState.redoStack = [];
-    historyState.isExecuting = false;
-    historyState.onStateChange = options.onStateChange || null;
+export function history_init_manager(options = {}) {
+    history_state.undo_list = [];
+    history_state.redo_list = [];
+    history_state.is_executing = false;
+    history_state.on_state_change = options.on_state_change || null;
 }
 
 class Command {
@@ -44,7 +44,7 @@ class Command {
         return this.execute();
     }
 
-    canCompact() {
+    can_compact() {
         return true;
     }
 }
@@ -76,7 +76,7 @@ export class DrawCommand extends Command {
         await this.execute(true);
     }
 
-    canCompact() {
+    can_compact() {
         return true;
     }
 }
@@ -108,7 +108,7 @@ export class EraseCommand extends Command {
         await this.execute();
     }
 
-    canCompact() {
+    can_compact() {
         return false;
     }
 }
@@ -150,7 +150,7 @@ export class ClearCommand extends Command {
         await this.execute();
     }
 
-    canCompact() {
+    can_compact() {
         return false;
     }
 }
@@ -195,137 +195,137 @@ export class SnapshotCommand extends Command {
         await this.execute();
     }
 
-    canCompact() {
+    can_compact() {
         return false;
     }
 }
 
-export async function executeCommand(command, needRedraw = true) {
-    if (historyState.isExecuting) return;
+export async function history_execute_command(command, needRedraw = true) {
+    if (history_state.is_executing) return;
     
-    historyState.isExecuting = true;
+    history_state.is_executing = true;
     try {
         await command.execute(needRedraw);
-        historyState.undoStack.push(command);
-        historyState.redoStack = [];
+        history_state.undo_list.push(command);
+        history_state.redo_list = [];
         
         const HARD_LIMIT = MAX_HISTORY_STEPS * 2;
-        if (historyState.undoStack.length > HARD_LIMIT) {
+        if (history_state.undo_list.length > HARD_LIMIT) {
             console.warn(`undoStack 超过硬性上限(${HARD_LIMIT}), 强制裁剪`);
-            const excessCount = historyState.undoStack.length - MAX_HISTORY_STEPS;
-            historyState.undoStack.splice(0, excessCount);
+            const excessCount = history_state.undo_list.length - MAX_HISTORY_STEPS;
+            history_state.undo_list.splice(0, excessCount);
         }
     } finally {
-        historyState.isExecuting = false;
+        history_state.is_executing = false;
     }
     
-    notifyStateChange();
+    history_handle_state_change();
 }
 
-export function canUndo() {
-    return historyState.undoStack.length > 0;
+export function history_validate_undo() {
+    return history_state.undo_list.length > 0;
 }
 
-export function canRedo() {
-    return historyState.redoStack.length > 0;
+export function history_validate_redo() {
+    return history_state.redo_list.length > 0;
 }
 
-export async function undo() {
-    if (historyState.isExecuting || historyState.undoStack.length === 0) return null;
+export async function history_handle_undo() {
+    if (history_state.is_executing || history_state.undo_list.length === 0) return null;
     
-    historyState.isExecuting = true;
+    history_state.is_executing = true;
     let command;
     try {
-        command = historyState.undoStack.pop();
+        command = history_state.undo_list.pop();
         await command.undo();
-        historyState.redoStack.push(command);
+        history_state.redo_list.push(command);
     } finally {
-        historyState.isExecuting = false;
+        history_state.is_executing = false;
     }
     
-    notifyStateChange();
+    history_handle_state_change();
     return command;
 }
 
-export async function redo() {
-    if (historyState.isExecuting || historyState.redoStack.length === 0) return null;
+export async function history_handle_redo() {
+    if (history_state.is_executing || history_state.redo_list.length === 0) return null;
     
-    historyState.isExecuting = true;
+    history_state.is_executing = true;
     let command;
     try {
-        command = historyState.redoStack.pop();
+        command = history_state.redo_list.pop();
         await command.redo();
-        historyState.undoStack.push(command);
+        history_state.undo_list.push(command);
     } finally {
-        historyState.isExecuting = false;
+        history_state.is_executing = false;
     }
     
-    notifyStateChange();
+    history_handle_state_change();
     return command;
 }
 
-export function clearHistory() {
-    historyState.undoStack = [];
-    historyState.redoStack = [];
-    notifyStateChange();
+export function history_delete_all() {
+    history_state.undo_list = [];
+    history_state.redo_list = [];
+    history_handle_state_change();
 }
 
-export function clearRedoStack() {
-    historyState.redoStack = [];
-    notifyStateChange();
+export function history_delete_redo_stack() {
+    history_state.redo_list = [];
+    history_handle_state_change();
 }
 
-export function getUndoStackLength() {
-    return historyState.undoStack.length;
+export function history_fetch_undo_length() {
+    return history_state.undo_list.length;
 }
 
-export function getRedoStackLength() {
-    return historyState.redoStack.length;
+export function history_fetch_redo_length() {
+    return history_state.redo_list.length;
 }
 
-export function getUndoStack() {
-    return historyState.undoStack;
+export function history_fetch_undo_stack() {
+    return history_state.undo_list;
 }
 
-export function getRedoStack() {
-    return historyState.redoStack;
+export function history_fetch_redo_stack() {
+    return history_state.redo_list;
 }
 
-function notifyStateChange() {
-    if (historyState.onStateChange) {
-        historyState.onStateChange({
-            canUndo: canUndo(),
-            canRedo: canRedo(),
-            undoCount: historyState.undoStack.length,
-            redoCount: historyState.redoStack.length
+function history_handle_state_change() {
+    if (history_state.on_state_change) {
+        history_state.on_state_change({
+            can_undo: history_validate_undo(),
+            can_redo: history_validate_redo(),
+            undoCount: history_state.undo_list.length,
+            redoCount: history_state.redo_list.length
         });
     }
 }
 
-export function shouldCompact() {
-    return historyState.undoStack.length > MAX_HISTORY_STEPS;
+export function history_validate_compact() {
+    return history_state.undo_list.length > MAX_HISTORY_STEPS;
 }
 
-export function getCommandsToCompact() {
-    if (historyState.undoStack.length <= MAX_HISTORY_STEPS) {
+export function history_fetch_commands_to_compact() {
+    if (history_state.undo_list.length <= MAX_HISTORY_STEPS) {
         return [];
     }
     
-    const compactCount = historyState.undoStack.length - MAX_HISTORY_STEPS;
-    return historyState.undoStack.slice(0, compactCount);
+    const compactCount = history_state.undo_list.length - MAX_HISTORY_STEPS;
+    return history_state.undo_list.slice(0, compactCount);
 }
 
-export function compactHistory(snapshotCommand) {
-    const compactCount = historyState.undoStack.length - MAX_HISTORY_STEPS;
+export function history_format_compact(snapshotCommand) {
+    const compactCount = history_state.undo_list.length - MAX_HISTORY_STEPS;
     if (compactCount <= 0) return false;
     
-    historyState.undoStack = [
+    history_state.undo_list = [
         snapshotCommand,
-        ...historyState.undoStack.slice(compactCount)
+        ...history_state.undo_list.slice(compactCount)
     ];
     
-    notifyStateChange();
+    history_handle_state_change();
     return true;
 }
 
-export { historyState };
+export { history_state };

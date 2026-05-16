@@ -3,7 +3,7 @@ use base64::{Engine as _, engine::general_purpose};
 
 const MAX_IMAGE_SIZE: usize = 50 * 1024 * 1024;
 
-pub fn decode_base64_image(image_data: &str) -> Result<DynamicImage, String> {
+pub fn image_load_base64(image_data: &str) -> Result<DynamicImage, String> {
     let base64_data = if image_data.starts_with("data:image") {
         image_data.split(',')
             .nth(1)
@@ -31,7 +31,7 @@ pub fn decode_base64_image(image_data: &str) -> Result<DynamicImage, String> {
     Ok(img)
 }
 
-pub fn extract_base64(image_data: &str) -> Result<Vec<u8>, String> {
+pub fn image_fetch_base64_data(image_data: &str) -> Result<Vec<u8>, String> {
     let base64_data = if image_data.starts_with("data:image") {
         image_data.split(',')
             .nth(1)
@@ -46,8 +46,8 @@ pub fn extract_base64(image_data: &str) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub fn rotate_image(image_data: String, direction: String) -> Result<String, String> {
-    let img = decode_base64_image(&image_data)?;
+pub fn image_update_rotation(image_data: String, direction: String) -> Result<String, String> {
+    let img = image_load_base64(&image_data)?;
     
     let rotated = if direction == "left" {
         img.rotate270()

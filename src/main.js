@@ -14,103 +14,68 @@
 import './batch-draw.js';
 import ThemeManager from './themes/theme.js';
 import {
-    initHistoryManager,
-    executeCommand,
+    history_execute_command,
     DrawCommand,
     EraseCommand,
     ClearCommand,
     SnapshotCommand,
-    canUndo,
-    undo as historyUndo,
-    clearHistory,
-    shouldCompact,
-    getCommandsToCompact,
-    compactHistory,
+    history_validate_undo,
+    history_handle_undo,
+    history_delete_all,
+    history_validate_compact,
+    history_fetch_commands_to_compact,
+    history_format_compact,
     MAX_HISTORY_STEPS
 } from './history.js';
 
 // ==================== 全局变量 ====================
-let lastCanvasTransform = { x: null, y: null, scale: null };
+let last_canvas_transform = { x: null, y: null, scale: null };
 let currentAnimationId = null;
-let pendingTransform = null;
-let transformRafId = null;
+let pending_transform = null;
+let transform_raf_id = null;
 
-function scheduleTransformUpdate(x, y, scale) {
-    if (!pendingTransform) {
-        pendingTransform = { x: 0, y: 0, scale: 1 };
+function main_update_transform_schedule(x, y, scale) {
+    if (!pending_transform) {
+        pending_transform = { x: 0, y: 0, scale: 1 };
     }
-    pendingTransform.x = x;
-    pendingTransform.y = y;
-    pendingTransform.scale = scale;
+    pending_transform.x = x;
+    pending_transform.y = y;
+    pending_transform.scale = scale;
     
-    if (transformRafId === null) {
-        transformRafId = requestAnimationFrame(() => {
-            if (pendingTransform) {
-                const pt = pendingTransform;
+    if (transform_raf_id === null) {
+        transform_raf_id = requestAnimationFrame(() => {
+            if (pending_transform) {
+                const pt = pending_transform;
                 dom.canvasWrapper.style.transform = `translate3d(${pt.x}px, ${pt.y}px, 0) scale(${pt.scale})`;
-                lastCanvasTransform.x = pt.x;
-                lastCanvasTransform.y = pt.y;
-                lastCanvasTransform.scale = pt.scale;
+                last_canvas_transform.x = pt.x;
+                last_canvas_transform.y = pt.y;
+                last_canvas_transform.scale = pt.scale;
             }
-            transformRafId = null;
+            transform_raf_id = null;
         });
     }
 }
 
 // ==================== PDF.js 配置 ====================
-// PDF.js 库初始化和等待加载
-
-function initPdfJs() {
+function main_init_pdfjs() {
     if (window.pdfjsLib) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'JS/pdf.worker.min.js';
-        console.log('PDF.js Worker 已配置');
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'JS/pdf.worker.min.js';
         return true;
     }
     console.warn('PDF.js 库未加载');
     return false;
 }
 
-async function waitForPdfJs(maxWait = 5000) {
+async function main_wait_pdfjs(maxWait = 5000) {
     const startTime = Date.now();
     while (!window.pdfjsLib && (Date.now() - startTime) < maxWait) {
         await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (window.pdfjsLib) {
-        initPdfJs();
+        main_init_pdfjs();
         return true;
     }
     return false;
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initPdfJs);
-} else {
-    initPdfJs();
-}
-
-// ==================== Tauri API ====================
-// Tauri 后端 API 接口封装
-
-const { invoke } = window.__TAURI__?.core || {};
-const getCurrentWindow = window.__TAURI__?.window?.getCurrentWindow;
-
-let cacheDir = null;
-let configDir = null;
-let cdsDir = null;
-
-async function initCacheDir() {
-    if (window.__TAURI__) {
-        try {
-            cacheDir = await invoke('get_cache_dir');
-            configDir = await invoke('get_config_dir');
-            cdsDir = await invoke('get_cds_dir');
-            console.log('缓存目录:', cacheDir);
-            console.log('配置目录:', configDir);
-            console.log('ViewStage目录:', cdsDir);
-        } catch (error) {
-            console.error('获取缓存目录失败:', error);
-        }
-    }
 }
 
 // ==================== 全局配置 ====================
@@ -147,10 +112,10 @@ const DRAW_CONFIG = {
 // 将配置暴露到全局，供 batch-draw.js 使用
 window.DRAW_CONFIG = DRAW_CONFIG;
 
-function getSafeScale() {
+function main_fetch_safe_scale() {
     return Math.max(0.001, state.scale || 1);
 }
-window.getSafeScale = getSafeScale;
+window.main_fetch_safe_scale = main_fetch_safe_scale;
 
 // ==================== 真实笔触效果管理器 ====================
 // 根据速度和压感动态调整线宽，模拟真实笔触效果
@@ -164,12 +129,12 @@ class RealPenManager {
         // 钢笔模式不需要重置
     }
     
-    updatePosition(x, y, timestamp) {
+    update_position(x, y, timestamp) {
         // 钢笔模式不需要速度计算
         return 0;
     }
     
-    calculateLineWidth(baseWidth, velocity, pressure = 0.5) {
+    calc_line_width(baseWidth, velocity, pressure = 0.5) {
         // 钢笔模式：固定线宽 + 轻微压感 (0.9-1.1 倍)
         const pressureFactor = 0.9 + (pressure * 0.2);
         return baseWidth * pressureFactor;
@@ -178,7 +143,7 @@ class RealPenManager {
 
 const realPenManager = new RealPenManager();
 
-function cloneStrokes(strokes, deep = false) {
+function main_stroke_clone(strokes, deep = false) {
     if (!strokes || strokes.length === 0) return [];
     if (deep) {
         return strokes.map(stroke => ({
@@ -189,7 +154,7 @@ function cloneStrokes(strokes, deep = false) {
             eraserSize: stroke.eraserSize,
             bounds: stroke.bounds ? { ...stroke.bounds } : undefined,
             variableWidths: stroke.variableWidths ? [...stroke.variableWidths] : null,
-            savedStrokeHistory: stroke.savedStrokeHistory ? cloneStrokes(stroke.savedStrokeHistory, true) : undefined,
+            savedStrokeHistory: stroke.savedStrokeHistory ? main_stroke_clone(stroke.savedStrokeHistory, true) : undefined,
             savedBaseImageURL: stroke.savedBaseImageURL
         }));
     }
@@ -206,8 +171,8 @@ function cloneStrokes(strokes, deep = false) {
     }));
 }
 
-function cloneStrokesDeep(strokes) {
-    return cloneStrokes(strokes, true);
+function main_main_stroke_clone_deep(strokes) {
+    return main_stroke_clone(strokes, true);
 }
 
 // 四叉树空间索引（用于快速查找与脏区域相交的笔画）
@@ -227,7 +192,7 @@ class StrokeQuadTree {
         if (!this.intersects(stroke.bounds)) return false;
         
         if (this.children) {
-            return this.insertToChildren(stroke);
+            return this.insert_to_children(stroke);
         }
         
         this.strokes.push(stroke);
@@ -239,7 +204,7 @@ class StrokeQuadTree {
         return true;
     }
     
-    insertToChildren(stroke) {
+    insert_to_children(stroke) {
         let inserted = false;
         for (const child of this.children) {
             if (child.insert(stroke)) {
@@ -262,7 +227,7 @@ class StrokeQuadTree {
         ];
         
         for (const stroke of this.strokes) {
-            this.insertToChildren(stroke);
+            this.insert_to_children(stroke);
         }
         this.strokes = [];
     }
@@ -271,7 +236,7 @@ class StrokeQuadTree {
         if (!this.intersects(range)) return found;
         
         for (const stroke of this.strokes) {
-            if (this.strokeIntersects(stroke, range)) {
+            if (this.stroke_intersects(stroke, range)) {
                 found.add(stroke);
             }
         }
@@ -293,7 +258,7 @@ class StrokeQuadTree {
                  bounds.minY - padding > this.boundary.y + this.boundary.height);
     }
     
-    strokeIntersects(stroke, range) {
+    stroke_intersects(stroke, range) {
         if (!stroke.bounds) return true;
         const padding = Math.max(stroke.lineWidth || 5, stroke.eraserSize || 5);
         return !(stroke.bounds.maxX + padding < range.x ||
@@ -423,7 +388,7 @@ let sourceDataStore = {};
 const MAX_SOURCE_CACHE = 50;
 
 // 生成源ID
-function generateSourceId(type, pageIndex = null) {
+function main_create_source_id(type, pageIndex = null) {
     if (type === 'cam') {
         return 'cam';
     } else if (type === 'pic') {
@@ -433,18 +398,18 @@ function generateSourceId(type, pageIndex = null) {
         if (pageIndex !== null && pageIndex !== undefined) {
             return `doc-${sourceIdCounters.doc}-${pageIndex}`;
         } else {
-            console.error('[错误] generateSourceId: 文档类型必须提供pageIndex参数');
+            console.error('[错误] main_create_source_id: 文档类型必须提供pageIndex参数');
             sourceIdCounters.doc++;
             return `doc-${sourceIdCounters.doc}-unknown`;
         }
     }
     
-    console.error(`[错误] generateSourceId: 未知的类型参数: ${type}`);
+    console.error(`[错误] main_create_source_id: 未知的类型参数: ${type}`);
     return `unknown-${Date.now()}`;
 }
 
 // 保存当前源数据
-function saveCurrentSourceData() {
+function main_save_current_source_data() {
     if (!currentSourceId) return;
     
     const keys = Object.keys(sourceDataStore);
@@ -469,7 +434,7 @@ function saveCurrentSourceData() {
         scale: state.scale,
         canvasX: state.canvasX,
         canvasY: state.canvasY,
-        strokeHistory: cloneStrokesDeep(state.strokeHistory),
+        strokeHistory: main_main_stroke_clone_deep(state.strokeHistory),
         baseImageURL: state.baseImageURL,
         timestamp: Date.now()
     };
@@ -478,9 +443,9 @@ function saveCurrentSourceData() {
 }
 
 // 加载指定源数据
-function loadSourceData(sourceId) {
+function main_load_source_data(sourceId) {
     if (!sourceId) {
-        console.warn('[源管理] loadSourceData: sourceId为空,跳过加载');
+        console.warn('[源管理] main_load_source_data: sourceId为空,跳过加载');
         return;
     }
     
@@ -489,7 +454,7 @@ function loadSourceData(sourceId) {
         state.scale = data.scale || 1;
         state.canvasX = data.canvasX || -(DRAW_CONFIG.canvasW - DRAW_CONFIG.screenW) / 2;
         state.canvasY = data.canvasY || -(DRAW_CONFIG.canvasH - DRAW_CONFIG.screenH) / 2;
-        state.strokeHistory = cloneStrokesDeep(data.strokeHistory || []);
+        state.strokeHistory = main_main_stroke_clone_deep(data.strokeHistory || []);
         state.baseImageURL = data.baseImageURL || null;
         state.baseImageObj = null;
         
@@ -504,7 +469,7 @@ function loadSourceData(sourceId) {
         state.strokeHistory = [];
         state.baseImageURL = null;
         state.baseImageObj = null;
-        clearHistory();
+        history_delete_all();
         
         console.log(`[源管理] 新源初始化: ${sourceId}`);
     }
@@ -513,24 +478,24 @@ function loadSourceData(sourceId) {
 }
 
 // 切换到新源
-async function switchToSource(newSourceId) {
+async function main_update_source(newSourceId) {
     // 保存当前源数据
-    saveCurrentSourceData();
+    main_save_current_source_data();
     
     // 加载新源数据
-    loadSourceData(newSourceId);
+    main_load_source_data(newSourceId);
     
     // 清除画布并重新渲染
-    clearDrawCanvas();
+    main_delete_draw_canvas();
     if (state.strokeHistory.length > 0) {
-        await redrawAllStrokes();
+        await main_render_all_strokes();
     }
     
     // 更新UI
-    updateMoveBound();
-    clampCanvasPosition();
-    updateCanvasTransform();
-    updateHistoryBtnStatus();
+    main_update_move_bound();
+    main_update_canvas_position();
+    main_update_canvas_transform();
+    main_update_history_button_status();
 }
 
 let dom = {};  // DOM 元素引用缓存
@@ -548,7 +513,7 @@ let cachedVisibleRectY = null;
 let offscreenCanvasPool = [];
 const MAX_OFFSCREEN_CANVAS = 2;
 
-function getOffscreenCanvas() {
+function main_fetch_offscreen_canvas() {
     if (offscreenCanvasPool.length > 0) {
         return offscreenCanvasPool.pop();
     }
@@ -561,7 +526,7 @@ function getOffscreenCanvas() {
     return { canvas, ctx };
 }
 
-function releaseOffscreenCanvas(offscreen) {
+function main_release_offscreen_canvas(offscreen) {
     if (offscreenCanvasPool.length < MAX_OFFSCREEN_CANVAS) {
         offscreen.ctx.setTransform(1, 0, 0, 1, 0, 0);
         offscreen.ctx.clearRect(0, 0, offscreen.canvas.width, offscreen.canvas.height);
@@ -570,199 +535,19 @@ function releaseOffscreenCanvas(offscreen) {
     }
 }
 
-function invalidateCachedRect() {
+function main_delete_cached_rect() {
     cachedCanvasRect = null;
 }
 
-function getCachedCanvasRect() {
+function main_fetch_cached_canvas_rect() {
     if (!cachedCanvasRect) {
         cachedCanvasRect = dom.canvasContainer.getBoundingClientRect();
     }
     return cachedCanvasRect;
 }
 
-// ==================== 初始化 ====================
-// 应用启动入口：DOM初始化、画布初始化、事件绑定、配置加载
-
-function emitSplashProgress(step, message) {
-    if (window.__TAURI__) {
-        const { emit } = window.__TAURI__.event;
-        emit('splash-progress', { step, message }).catch(() => {});
-    }
-}
-
-window.addEventListener('DOMContentLoaded', async () => {
-    try {
-        emitSplashProgress(0, '正在初始化...');
-        
-        if (window.i18n) {
-            await window.i18n.init();
-        }
-        
-        if (window.__TAURI__) {
-            const isOobeActive = await invoke('is_oobe_active');
-            if (isOobeActive) {
-                console.log('OOBE 激活中，跳过主窗口初始化');
-                return;
-            }
-            listenForPdfFileOpen();
-        }
-        
-        if (!initDOM()) {
-            throw new Error('DOM 初始化失败');
-        }
-        initCanvas();
-        initHistoryManager({
-            onStateChange: () => {
-                updateHistoryBtnStatus();
-            }
-        });
-        bindAllEvents();
-        saveSnapshot();
-        
-        window.addEventListener('resize', handleResize);
-        
-        emitSplashProgress(1, '正在加载设置...');
-        await initCacheDir();
-        
-        try {
-            const { invoke } = window.__TAURI__.core;
-            const cleared = await invoke('check_auto_clear_cache');
-            if (cleared) {
-                console.log('自动清除缓存已执行');
-            }
-        } catch (e) {
-            console.log('检查自动清除缓存失败:', e);
-        }
-        
-        await loadCameraSetting();
-        
-        emitSplashProgress(2, '正在加载主题...');
-        
-        emitSplashProgress(3, '正在初始化摄像头...');
-        
-        try {
-            await openCamera();
-        } catch (error) {
-            if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-                console.log('未检测到摄像头，使用无摄像头模式');
-                await initWithoutCamera(window.i18n?.t('camera.notDetected') || '未检测到摄像头');
-            } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                console.log('摄像头权限被拒绝，使用无摄像头模式');
-                await initWithoutCamera(window.i18n?.t('camera.noPermission') || '无摄像头权限');
-            } else {
-                console.error('摄像头初始化失败:', error);
-                await initWithoutCamera(window.i18n?.t('camera.initFailed') || '摄像头初始化失败');
-            }
-        }
-        
-        console.log('画布初始化完成');
-        
-        emitSplashProgress(4, '正在完成...');
-        
-        emitSplashProgress(5, '');
-        
-        if (window.__TAURI__) {
-            try {
-                await invoke('close_splashscreen');
-            } catch (e) {
-                console.log('关闭启动界面失败:', e);
-            }
-        }
-    } catch (error) {
-        console.error('初始化失败:', error);
-        showErrorDialog(
-            window.i18n?.t('errors.initFailed') || '初始化失败',
-            window.i18n?.t('errors.initFailedDesc') || '应用初始化失败，请刷新页面重试'
-        );
-    }
-});
-
-window.addEventListener('beforeunload', () => {
-    cleanupImageBlobUrls();
-    cleanupAllPdfBlobUrls();
-    console.log('页面卸载,已清理所有 Blob URL');
-});
-
-async function loadCameraSetting() {
-    if (window.__TAURI__) {
-        try {
-            const { invoke } = window.__TAURI__.core;
-            const settings = await invoke('get_settings');
-            
-            if (settings.defaultCamera) {
-                state.defaultCameraId = settings.defaultCamera;
-                console.log('已加载摄像头设置:', settings.defaultCamera);
-            }
-            
-            // 加载摄像头分辨率设置
-            if (settings.cameraWidth && settings.cameraHeight) {
-                state.cameraWidth = settings.cameraWidth;
-                state.cameraHeight = settings.cameraHeight;
-                console.log('已加载摄像头分辨率:', settings.cameraWidth, 'x', settings.cameraHeight);
-            }
-            
-            // 加载默认旋转角度
-            if (settings.defaultRotation !== undefined) {
-                state.cameraRotation = settings.defaultRotation;
-                console.log('已加载默认旋转角度:', settings.defaultRotation, '°');
-            }
-            
-            // 加载渲染分辨率设置
-            if (settings.width && settings.height) {
-                DRAW_CONFIG.renderW = settings.width;
-                DRAW_CONFIG.renderH = settings.height;
-                console.log('已加载渲染分辨率:', settings.width, 'x', settings.height);
-            }
-            
-            if (settings.pdfScale) {
-                DRAW_CONFIG.pdfScale = settings.pdfScale;
-                console.log('已加载 PDF 输出分辨率:', settings.pdfScale);
-            }
-            
-            if (settings.penColors && Array.isArray(settings.penColors)) {
-                DRAW_CONFIG.penColors = settings.penColors.map(color => {
-                    if (typeof color === 'object' && color.r !== undefined) {
-                        return rgbToHex(color.r, color.g, color.b);
-                    }
-                    return color;
-                });
-                console.log('已加载画笔颜色:', DRAW_CONFIG.penColors);
-                updateColorButtons();
-            }
-            
-            // 加载帧率模式设置
-            if (settings.frameRateMode !== undefined) {
-                if (window.batchDrawManager) {
-                    window.batchDrawManager.setFrameRateMode(settings.frameRateMode);
-                }
-                console.log('已加载帧率模式设置:', settings.frameRateMode);
-            }
-            
-            // 加载文档扫描按钮显示设置
-            if (settings.showDocScanButton !== undefined) {
-                state.showDocScanButton = settings.showDocScanButton;
-                console.log('已加载文档扫描按钮显示设置:', settings.showDocScanButton);
-            }
-            
-            // 加载主题设置
-            const themeName = settings.theme || 'simplify';
-            await ThemeManager.setTheme(themeName);
-            console.log('已加载主题设置:', themeName);
-            
-            // 从主题获取画布背景颜色
-            const canvasBgColor = ThemeManager.getCanvasBgColor();
-            DRAW_CONFIG.canvasBgColor = canvasBgColor;
-            updateCanvasBgColor(canvasBgColor);
-            console.log('已加载画布背景颜色:', canvasBgColor);
-        } catch (error) {
-            console.error('加载摄像头设置失败:', error);
-        }
-    }
-}
-
 // 监听系统关联打开的PDF文件
-function listenForPdfFileOpen() {
+function main_setup_pdf_file_open() {
     if (!window.__TAURI__) {
         console.log('非 Tauri 环境，跳过文件打开监听');
         return;
@@ -785,12 +570,12 @@ function listenForPdfFileOpen() {
                 filePath = decodeURIComponent(filePath.replace('file://', ''));
             }
             console.log('最终文件路径:', filePath);
-            loadPdfFromPath(filePath);
+            main_load_pdf_from_path(filePath);
         } else {
             console.error('无法解析文件路径，payload:', event.payload);
-            showErrorDialog(
-                window.i18n?.t('errors.fileError') || '文件错误',
-                window.i18n?.t('errors.fileParseError') || '无法解析文件路径'
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.fileError') || '文件错误',
+                window.i18n?.format_translate('errors.fileParseError') || '无法解析文件路径'
             );
         }
     }).then(() => {
@@ -816,7 +601,7 @@ function listenForPdfFileOpen() {
                 filePath = decodeURIComponent(filePath.replace('file://', ''));
             }
             console.log('最终文件路径:', filePath);
-            loadPdfFromPath(filePath);
+            main_load_pdf_from_path(filePath);
         }
     }).catch(err => {
         console.log('opener 事件监听可选:', err);
@@ -824,7 +609,7 @@ function listenForPdfFileOpen() {
     
     listen('rotate-image', (event) => {
         const direction = event.payload;
-        rotateImage(direction);
+        main_update_image_rotation(direction);
     }).catch(err => {
         console.error('rotate-image 事件监听失败:', err);
     });
@@ -832,7 +617,7 @@ function listenForPdfFileOpen() {
     listen('mirror-changed', (event) => {
         state.isMirrored = event.payload;
         if (state.isCameraOpen) {
-            updateCameraVideoStyle();
+            main_update_camera_video_style();
         }
         console.log('镜像状态已更改:', state.isMirrored);
     }).catch(err => {
@@ -840,7 +625,7 @@ function listenForPdfFileOpen() {
     });
     
     listen('switch-camera', () => {
-        switchCamera();
+        main_update_camera();
         console.log('切换摄像头');
     }).catch(err => {
         console.error('switch-camera 事件监听失败:', err);
@@ -873,32 +658,32 @@ function listenForPdfFileOpen() {
         if (settings.penColors && Array.isArray(settings.penColors)) {
             DRAW_CONFIG.penColors = settings.penColors.map(color => {
                 if (typeof color === 'object' && color.r !== undefined) {
-                    return rgbToHex(color.r, color.g, color.b);
+                    return main_calc_rgb_to_hex(color.r, color.g, color.b);
                 }
                 return color;
             });
-            updateColorButtons();
+            main_update_color_buttons();
             console.log('画笔颜色已更改:', DRAW_CONFIG.penColors);
         }
         
         if (settings.showDocScanButton !== undefined) {
             state.showDocScanButton = settings.showDocScanButton;
-            updatePhotoButtonState();
+            main_update_photo_button_state();
             console.log('文档扫描按钮显示已更改:', settings.showDocScanButton);
         }
         
         if (settings.theme !== undefined) {
-            ThemeManager.setTheme(settings.theme).then(() => {
-                const canvasBgColor = ThemeManager.getCanvasBgColor();
+            ThemeManager.theme_update_active(settings.theme).then(() => {
+                const canvasBgColor = ThemeManager.theme_fetch_canvas_bg_color();
                 DRAW_CONFIG.canvasBgColor = canvasBgColor;
-                updateCanvasBgColor(canvasBgColor);
+                main_update_canvas_bg_color(canvasBgColor);
                 
                 const noCameraMsg = document.getElementById('noCameraMessage');
                 if (noCameraMsg && noCameraMsg.style.display !== 'none') {
-                    const style = ThemeManager.getNoCameraMessageStyle();
+                    const style = ThemeManager.theme_fetch_no_camera_style();
                     noCameraMsg.innerHTML = `
                         <div style="font-size: 2.5vw; color: ${style.textColor}; margin-bottom: 2vh; text-shadow: ${style.textShadow};">( $ _ $ )</div>
-                        <div style="font-size: 1.2vw; color: ${style.secondaryTextColor}; margin-bottom: 1vh; text-shadow: ${style.textShadow};">${window.i18n?.t('camera.deviceNotFound') || '找不到展台设备'}</div>
+                        <div style="font-size: 1.2vw; color: ${style.secondaryTextColor}; margin-bottom: 1vh; text-shadow: ${style.textShadow};">${window.i18n?.format_translate('camera.deviceNotFound') || '找不到展台设备'}</div>
                         <div style="font-size: 0.9vw; color: ${style.tertiaryTextColor}; text-shadow: ${style.textShadow};">${noCameraMsg.dataset.message || ''}</div>
                     `;
                 }
@@ -909,9 +694,9 @@ function listenForPdfFileOpen() {
         
         if (needRestartCamera && state.isCameraOpen) {
             console.log('摄像头设置已更改，重新初始化摄像头...');
-            setCameraState(false).then(() => {
+            main_update_camera_state(false).then(() => {
                 setTimeout(() => {
-                    setCameraState(true);
+                    main_update_camera_state(true);
                 }, 300);
             });
         }
@@ -926,7 +711,7 @@ function listenForPdfFileOpen() {
         if (imageData) {
             const img = new Image();
             img.onload = async () => {
-                await addImageToListNoHighlight(img, name);
+                await main_save_image_to_list_no_highlight(img, name);
             };
             img.src = imageData;
         }
@@ -935,10 +720,10 @@ function listenForPdfFileOpen() {
     });
 }
 
-async function processPdfPagesLazy(pdf, totalPages, initialPages = 3, docNumber = null) {
+async function main_render_pdf_pages_lazy(pdf, totalPages, initialPages = 3, docNumber = null) {
     const pages = [];
     
-    async function processPage(pageNum) {
+    async function render_page(pageNum) {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale: DRAW_CONFIG.pdfScale });
         
@@ -977,8 +762,8 @@ async function processPdfPagesLazy(pdf, totalPages, initialPages = 3, docNumber 
     
     const pagesToLoad = Math.min(initialPages, totalPages);
     for (let i = 1; i <= pagesToLoad; i++) {
-        updateLoadingProgress(window.i18n?.t('loading.processingPage', { current: i, total: totalPages }) || `正在处理 ${i}/${totalPages} 页`);
-        const pageData = await processPage(i);
+        main_update_loading_progress(window.i18n?.format_translate('loading.processingPage', { current: i, total: totalPages }) || `正在处理 ${i}/${totalPages} 页`);
+        const pageData = await render_page(i);
         pages.push(pageData);
         state.loadedPages.add(pageData.sourceId);
     }
@@ -1001,7 +786,7 @@ async function processPdfPagesLazy(pdf, totalPages, initialPages = 3, docNumber 
     return pages;
 }
 
-async function loadPdfPage(pdf, pageNum, docNumber) {
+async function main_load_pdf_page(pdf, pageNum, docNumber) {
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale: DRAW_CONFIG.pdfScale });
     
@@ -1037,11 +822,11 @@ async function loadPdfPage(pdf, pageNum, docNumber) {
     };
 }
 
-async function processPdfPagesParallel(pdf, totalPages, batchSize = 4, docNumber = null) {
+async function main_render_pdf_pages_parallel(pdf, totalPages, batchSize = 4, docNumber = null) {
     const pages = [];
     let processedCount = 0;
     
-    async function processPage(pageNum) {
+    async function render_page(pageNum) {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale: DRAW_CONFIG.pdfScale });
         
@@ -1064,7 +849,7 @@ async function processPdfPagesParallel(pdf, totalPages, batchSize = 4, docNumber
         const fullUrl = URL.createObjectURL(fullBlob);
         
         processedCount++;
-        updateLoadingProgress(window.i18n?.t('loading.processingPage', { current: processedCount, total: totalPages }) || `正在处理 ${processedCount}/${totalPages} 页`);
+        main_update_loading_progress(window.i18n?.format_translate('loading.processingPage', { current: processedCount, total: totalPages }) || `正在处理 ${processedCount}/${totalPages} 页`);
         
         let sourceId = null;
         if (docNumber !== null) {
@@ -1083,7 +868,7 @@ async function processPdfPagesParallel(pdf, totalPages, batchSize = 4, docNumber
     for (let i = 1; i <= totalPages; i += batchSize) {
         const batch = [];
         for (let j = i; j <= Math.min(i + batchSize - 1, totalPages); j++) {
-            batch.push(processPage(j));
+            batch.push(render_page(j));
         }
         const batchResults = await Promise.all(batch);
         pages.push(...batchResults);
@@ -1096,16 +881,16 @@ async function processPdfPagesParallel(pdf, totalPages, batchSize = 4, docNumber
     return pages;
 }
 
-async function loadPdfFromPath(filePath) {
+async function main_load_pdf_from_path(filePath) {
     // 保存当前批注数据
     if (currentSourceId) {
-        saveCurrentSourceData();
+        main_save_current_source_data();
     }
     
     const wasCameraOpen = state.isCameraOpen;
     
     if (state.isCameraOpen) {
-        await setCameraState(false);
+        await main_update_camera_state(false);
     }
     
     console.log('开始加载文件:', filePath);
@@ -1114,48 +899,48 @@ async function loadPdfFromPath(filePath) {
     const isWord = fileName_lower.endsWith('.docx') || fileName_lower.endsWith('.doc');
     
     if (isWord) {
-        showLoadingOverlay(window.i18n?.t('loading.detectingOffice') || '正在检测 Office 软件...');
+        main_show_loading_overlay(window.i18n?.format_translate('loading.detectingOffice') || '正在检测 Office 软件...');
         
         const { invoke } = window.__TAURI__.core;
         const { fs } = window.__TAURI__;
         
         let detection;
         try {
-            detection = await invoke('detect_office');
+            detection = await invoke('office_detect_all');
             console.log('Office 检测结果:', detection);
             if (detection.recommended === 'None') {
-                hideLoadingOverlay();
-                showErrorDialog(
-                    window.i18n?.t('errors.officeNotInstalled') || 'Office 未安装',
-                    window.i18n?.t('errors.officeNotInstalledDesc') || '未检测到可用的 Office 软件\n\n请安装以下软件之一：\n• Microsoft Word\n• WPS Office\n• LibreOffice\n\n或将 Word 文档另存为 PDF 后导入'
+                main_hide_loading_overlay();
+                main_show_error_dialog(
+                    window.i18n?.format_translate('errors.officeNotInstalled') || 'Office 未安装',
+                    window.i18n?.format_translate('errors.officeNotInstalledDesc') || '未检测到可用的 Office 软件\n\n请安装以下软件之一：\n• Microsoft Word\n• WPS Office\n• LibreOffice\n\n或将 Word 文档另存为 PDF 后导入'
                 );
-                if (wasCameraOpen) await setCameraState(true);
+                if (wasCameraOpen) await main_update_camera_state(true);
                 return;
             }
         } catch (e) {
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
             console.log('检测 Office 失败:', e);
-            showErrorDialog(
-                window.i18n?.t('errors.officeDetectFailed') || '检测失败',
-                window.i18n?.t('errors.officeDetectFailedDesc') || '检测 Office 软件失败，请重试'
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.officeDetectFailed') || '检测失败',
+                window.i18n?.format_translate('errors.officeDetectFailedDesc') || '检测 Office 软件失败，请重试'
             );
-            if (wasCameraOpen) await setCameraState(true);
+            if (wasCameraOpen) await main_update_camera_state(true);
             return;
         }
         
-        updateLoadingProgress(window.i18n?.t('loading.readingFile') || '正在读取文件...');
+        main_update_loading_progress(window.i18n?.format_translate('loading.readingFile') || '正在读取文件...');
         
         let fileData;
         try {
             fileData = await fs.readFile(filePath);
         } catch (readError) {
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
             console.error('文件读取失败:', readError);
-            showErrorDialog(
-                window.i18n?.t('errors.readFailed') || '读取失败',
-                window.i18n?.t('errors.readFailedDesc') || '无法读取文件'
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.readFailed') || '读取失败',
+                window.i18n?.format_translate('errors.readFailedDesc') || '无法读取文件'
             );
-            if (wasCameraOpen) await setCameraState(true);
+            if (wasCameraOpen) await main_update_camera_state(true);
             return;
         }
         
@@ -1168,48 +953,48 @@ async function loadPdfFromPath(filePath) {
         
         console.log('文件大小:', uint8Array.length, '字节');
         
-        updateLoadingProgress(window.i18n?.t('loading.processingWord') || '正在处理 Word 文档...');
+        main_update_loading_progress(window.i18n?.format_translate('loading.processingWord') || '正在处理 Word 文档...');
         
         let pdfPath = null;
         try {
-            pdfPath = await invoke('convert_docx_to_pdf_from_bytes', { 
+            pdfPath = await invoke('office_convert_docx_to_pdf_bytes', { 
                 fileData: Array.from(uint8Array),
                 fileName: filePath.split(/[/\\]/).pop()
             });
             console.log('Word 文档已转换为 PDF:', pdfPath);
         } catch (convertError) {
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
             console.error('Word 转换失败:', convertError);
             const errorMsg = String(convertError);
-            let friendlyMsg = window.i18n?.t('errors.wordConvertFailed') || 'Word 文档转换失败';
+            let friendlyMsg = window.i18n?.format_translate('errors.wordConvertFailed') || 'Word 文档转换失败';
             
             if (errorMsg.includes('Office') || errorMsg.includes('Word') || errorMsg.includes('WPS')) {
-                friendlyMsg = window.i18n?.t('errors.officeCallFailed') || 'Office 软件调用失败\n\n可能的原因：\n• Office 软件未正确安装\n• 文件被其他程序占用\n• 文件格式不支持';
+                friendlyMsg = window.i18n?.format_translate('errors.officeCallFailed') || 'Office 软件调用失败\n\n可能的原因：\n• Office 软件未正确安装\n• 文件被其他程序占用\n• 文件格式不支持';
             }
             
-            showErrorDialog(
-                window.i18n?.t('errors.convertFailed') || '转换失败',
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.convertFailed') || '转换失败',
                 friendlyMsg,
                 () => {
-                    loadPdfFromPath(filePath);
+                    main_load_pdf_from_path(filePath);
                 }
             );
-            if (wasCameraOpen) await setCameraState(true);
+            if (wasCameraOpen) await main_update_camera_state(true);
             return;
         }
         
-        updateLoadingProgress(window.i18n?.t('loading.renderingPage') || '正在渲染页面...');
+        main_update_loading_progress(window.i18n?.format_translate('loading.renderingPage') || '正在渲染页面...');
         
         try {
-            const pdfReady = await waitForPdfJs();
+            const pdfReady = await main_wait_pdfjs();
             if (!pdfReady) {
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.error('PDF.js 库加载超时');
-                showErrorDialog(
-                    window.i18n?.t('errors.loadFailed') || '加载失败',
-                    window.i18n?.t('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
+                main_show_error_dialog(
+                    window.i18n?.format_translate('errors.loadFailed') || '加载失败',
+                    window.i18n?.format_translate('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
                 );
-                if (wasCameraOpen) await setCameraState(true);
+                if (wasCameraOpen) await main_update_camera_state(true);
                 return;
             }
             
@@ -1235,19 +1020,19 @@ async function loadPdfFromPath(filePath) {
             
             if (state.pdfDocuments.size >= MAX_PDF_CACHE) {
                 const firstKey = state.pdfDocuments.keys().next().value;
-                cleanupPdfBlobUrls(firstKey);
+                main_delete_pdf_blob_urls(firstKey);
                 state.pdfDocuments.delete(firstKey);
                 console.log(`[PDF缓存] 缓存已满,移除文档: ${firstKey}`);
             }
             
             state.pdfDocuments.set(docNumber, pdf);
             
-            const processedPages = await processPdfPagesLazy(pdf, totalPages, 3, docNumber);
+            const processedPages = await main_render_pdf_pages_lazy(pdf, totalPages, 3, docNumber);
             folder.pages = processedPages;
             
             state.fileList.push(folder);
-            updateFileSidebarContent();
-            expandFileSidebar();
+            main_update_file_sidebar_content();
+            main_show_file_sidebar();
             
             if (folder.pages.length > 0) {
                 const firstPage = folder.pages[0];
@@ -1259,16 +1044,16 @@ async function loadPdfFromPath(filePath) {
                     
                     // 切换到新源ID
                     if (firstPage.sourceId) {
-                        await switchToSource(firstPage.sourceId);
+                        await main_update_source(firstPage.sourceId);
                     }
                     
-                    drawImageToCenter(img);
-                    updatePhotoButtonState();
+                    main_render_image_centered(img);
+                    main_update_photo_button_state();
                 };
                 img.src = firstPage.full;
             }
             
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
             console.log(`文件已导入: ${folder.name}，共${folder.pages.length}页`);
             
             try {
@@ -1277,30 +1062,30 @@ async function loadPdfFromPath(filePath) {
                 console.log('清理转换的 PDF 失败:', e);
             }
         } catch (error) {
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
             console.error('文件导入失败:', error);
-            showErrorDialog(
-                window.i18n?.t('errors.importFailed') || '导入失败',
-                window.i18n?.t('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.importFailed') || '导入失败',
+                window.i18n?.format_translate('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
             );
-            if (wasCameraOpen) await setCameraState(true);
+            if (wasCameraOpen) await main_update_camera_state(true);
         }
         
         return;
     }
     
-    showLoadingOverlay(window.i18n?.t('loading.importingFile') || '正在导入文件...');
+    main_show_loading_overlay(window.i18n?.format_translate('loading.importingFile') || '正在导入文件...');
     
     try {
-        const pdfReady = await waitForPdfJs();
+        const pdfReady = await main_wait_pdfjs();
         if (!pdfReady) {
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
             console.error('PDF.js 库加载超时');
-            showErrorDialog(
-                window.i18n?.t('errors.loadFailed') || '加载失败',
-                window.i18n?.t('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.loadFailed') || '加载失败',
+                window.i18n?.format_translate('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
             );
-            if (wasCameraOpen) await setCameraState(true);
+            if (wasCameraOpen) await main_update_camera_state(true);
             return;
         }
         
@@ -1312,12 +1097,12 @@ async function loadPdfFromPath(filePath) {
             console.log('文件读取成功，数据类型:', typeof fileData, '是否数组:', Array.isArray(fileData));
         } catch (readError) {
             console.error('文件读取失败:', readError);
-            hideLoadingOverlay();
-            showErrorDialog(
-                window.i18n?.t('errors.readFailed') || '读取失败',
-                window.i18n?.t('errors.readFailedDesc') || '无法读取文件'
+            main_hide_loading_overlay();
+            main_show_error_dialog(
+                window.i18n?.format_translate('errors.readFailed') || '读取失败',
+                window.i18n?.format_translate('errors.readFailedDesc') || '无法读取文件'
             );
-            if (wasCameraOpen) await setCameraState(true);
+            if (wasCameraOpen) await main_update_camera_state(true);
             return;
         }
         
@@ -1347,12 +1132,12 @@ async function loadPdfFromPath(filePath) {
         sourceIdCounters.doc++;  // 增加文档计数器
         const docNumber = sourceIdCounters.doc;
         
-        const processedPages = await processPdfPagesParallel(pdf, totalPages, 4, docNumber);
+        const processedPages = await main_render_pdf_pages_parallel(pdf, totalPages, 4, docNumber);
         folder.pages = processedPages;
         
         state.fileList.push(folder);
-        updateFileSidebarContent();
-        expandFileSidebar();
+        main_update_file_sidebar_content();
+        main_show_file_sidebar();
         
         if (folder.pages.length > 0) {
             const firstPage = folder.pages[0];
@@ -1364,42 +1149,42 @@ async function loadPdfFromPath(filePath) {
                 
                 // 切换到新源ID
                 if (firstPage.sourceId) {
-                    await switchToSource(firstPage.sourceId);
+                    await main_update_source(firstPage.sourceId);
                 }
                 
-                drawImageToCenter(img);
-                updatePhotoButtonState();
+                main_render_image_centered(img);
+                main_update_photo_button_state();
             };
             img.src = firstPage.full;
         }
         
-        hideLoadingOverlay();
+        main_hide_loading_overlay();
         console.log(`文件已导入: ${folder.name}，共${folder.pages.length}页`);
     } catch (error) {
-        hideLoadingOverlay();
+        main_hide_loading_overlay();
         console.error('文件导入失败:', error);
-        showErrorDialog(
-            window.i18n?.t('errors.importFailed') || '导入失败',
-            window.i18n?.t('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
+        main_show_error_dialog(
+            window.i18n?.format_translate('errors.importFailed') || '导入失败',
+            window.i18n?.format_translate('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
         );
-        if (wasCameraOpen) await setCameraState(true);
+        if (wasCameraOpen) await main_update_camera_state(true);
     }
 }
 
 // 处理窗口大小变化
-async function handleResize() {
-    invalidateCachedRect();
+async function main_handle_resize() {
+    main_delete_cached_rect();
     const container = dom.canvasContainer;
     const newScreenW = container.clientWidth;
     const newScreenH = container.clientHeight;
     
     if (newScreenW !== DRAW_CONFIG.screenW || newScreenH !== DRAW_CONFIG.screenH) {
-        await resizeCanvas(newScreenW, newScreenH);
+        await main_update_canvas_size(newScreenW, newScreenH);
     }
 }
 
 // 调整画布大小
-async function resizeCanvas(newScreenW, newScreenH) {
+async function main_update_canvas_size(newScreenW, newScreenH) {
     // 保存当前状态
     const oldScale = state.scale;
     const oldCanvasX = state.canvasX;
@@ -1414,7 +1199,7 @@ async function resizeCanvas(newScreenW, newScreenH) {
     // 使用固定的 DPR
     DRAW_CONFIG.dpr = DRAW_CONFIG.baseDpr;
     
-    updateMoveBound();
+    main_update_move_bound();
     
     // 批注层：摄像头模式下如果没有批注，可以跳过尺寸设置
     const hasStrokes = state.strokeHistory && state.strokeHistory.length > 0;
@@ -1446,12 +1231,12 @@ async function resizeCanvas(newScreenW, newScreenH) {
     
     // 重新绘制内容
     if (state.currentImage) {
-        drawImageToCenter(state.currentImage);
+        main_render_image_centered(state.currentImage);
     }
     
     // 重新绘制批注
     if (state.strokeHistory.length > 0 || state.baseImageObj) {
-        await redrawAllStrokes();
+        await main_render_all_strokes();
     }
     
     // 恢复画布位置和缩放
@@ -1459,125 +1244,15 @@ async function resizeCanvas(newScreenW, newScreenH) {
     state.canvasX = oldCanvasX;
     state.canvasY = oldCanvasY;
     
-    updateMoveBound();
-    clampCanvasPosition();
-    updateCanvasTransform();
+    main_update_move_bound();
+    main_update_canvas_position();
+    main_update_canvas_transform();
     
     console.log(`窗口调整: 屏幕 ${newScreenW}x${newScreenH}, 画布 ${DRAW_CONFIG.canvasW}x${DRAW_CONFIG.canvasH}, DPR ${DRAW_CONFIG.dpr.toFixed(2)}`);
 }
 
-// 初始化 DOM 元素引用
-function initDOM() {
-    dom.canvasContainer = document.getElementById('canvasContainer');
-    dom.canvasWrapper = document.getElementById('canvasWrapper');
-    dom.imageElement = document.getElementById('imageElement');
-    dom.drawCanvas = document.getElementById('drawCanvas');
-    dom.cameraVideo = document.getElementById('cameraVideo');
-    dom.eraserHint = document.getElementById('eraserHint');
-    dom.penControlPanel = document.getElementById('penControlPanel');
-    dom.settingsPanel = document.getElementById('settingsPanel');
-    
-    dom.penSizeSliderWrapper = document.getElementById('penSizeSliderWrapper');
-    dom.penSizeThumb = document.getElementById('penSizeThumb');
-    dom.penSizeValue = document.getElementById('penSizeValue');
-    dom.penColorPicker = document.getElementById('penColorPicker');
-    dom.eraserSizeSliderWrapper = document.getElementById('eraserSizeSliderWrapper');
-    dom.eraserSizeThumb = document.getElementById('eraserSizeThumb');
-    dom.eraserSizeValue = document.getElementById('eraserSizeValue');
-    
-    dom.btnMove = document.getElementById('btnMove');
-    dom.btnComment = document.getElementById('btnComment');
-    dom.btnEraser = document.getElementById('btnEraser');
-    dom.btnUndo = document.getElementById('btnUndo');
-    dom.btnClear = document.getElementById('btnClear');
-    dom.btnPhoto = document.getElementById('btnPhoto');
-    dom.btnSettings = document.getElementById('btnSettings');
-    dom.btnExpand = document.getElementById('btnExpand');
-    dom.btnSave = document.getElementById('btnSave');
-    dom.btnMinimize = document.getElementById('btnMinimize');
-    dom.btnMenu = document.getElementById('btnMenu');
-    
-    dom.btnDocScan = document.getElementById('btnDocScan');
-    dom.docScanPanel = document.getElementById('docScanPanel');
-    dom.scanAutoDetect = document.getElementById('scanAutoDetect');
-    dom.scanEnhance = document.getElementById('scanEnhance');
-    dom.scanDenoise = document.getElementById('scanDenoise');
-    dom.scanBinarize = document.getElementById('scanBinarize');
-    dom.btnApplyScan = document.getElementById('btnApplyScan');
-    dom.btnCancelScan = document.getElementById('btnCancelScan');
-    
-    if (!dom.imageElement || !dom.drawCanvas || !dom.canvasContainer) {
-        console.error('必需的元素未找到');
-        return false;
-    }
-    
-    dom.drawCtx = dom.drawCanvas.getContext('2d', { alpha: true, desynchronized: true });
-    
-    return true;
-}
-
-// ==================== 画布初始化 ====================
-// 两层Canvas初始化：图像层、批注层
-
-/**
- * 初始化画布
- * - 物理尺寸 = 逻辑尺寸 × DPR (Retina适配)
- * - CSS尺寸 = 逻辑尺寸
- */
-function initCanvas() {
-    const container = dom.canvasContainer;
-    const screenW = container.clientWidth;
-    const screenH = container.clientHeight;
-    
-    DRAW_CONFIG.screenW = screenW;
-    DRAW_CONFIG.screenH = screenH;
-    DRAW_CONFIG.canvasW = Math.floor(screenW * 2);
-    DRAW_CONFIG.canvasH = Math.floor(screenH * 2);
-    
-    updateMoveBound();
-    
-    state.canvasX = -(DRAW_CONFIG.canvasW - DRAW_CONFIG.screenW) / 2;
-    state.canvasY = -(DRAW_CONFIG.canvasH - DRAW_CONFIG.screenH) / 2;
-    
-    // 初始化摄像头视图状态
-    state.cameraViewState = {
-        scale: 1,
-        canvasX: state.canvasX,
-        canvasY: state.canvasY,
-        strokeHistory: [],
-        baseImageURL: null
-    };
-    
-    // 批注层：物理尺寸 = CSS尺寸 × dpr
-    dom.drawCanvas.width = DRAW_CONFIG.canvasW * DRAW_CONFIG.dpr;
-    dom.drawCanvas.height = DRAW_CONFIG.canvasH * DRAW_CONFIG.dpr;
-    
-    // 所有层 CSS 尺寸相同
-    dom.imageElement.style.width = DRAW_CONFIG.canvasW + 'px';
-    dom.imageElement.style.height = DRAW_CONFIG.canvasH + 'px';
-    dom.drawCanvas.style.width = DRAW_CONFIG.canvasW + 'px';
-    dom.drawCanvas.style.height = DRAW_CONFIG.canvasH + 'px';
-    
-    dom.drawCtx.scale(DRAW_CONFIG.dpr, DRAW_CONFIG.dpr);
-    
-    const dc = dom.drawCtx;
-    dc.imageSmoothingEnabled = false;
-    dc.lineCap = 'round';
-    dc.lineJoin = 'round';
-    dc.miterLimit = 10;
-    
-    setPenStyle();
-    updateEraserHintSize();
-    updateCanvasTransform();
-    updateCanvasBgColor(DRAW_CONFIG.canvasBgColor);
-    
-    dom.btnMove.classList.add('primary-btn');
-    
-    console.log(`画布初始化: 屏幕 ${screenW}x${screenH}, 画布 ${DRAW_CONFIG.canvasW}x${DRAW_CONFIG.canvasH}`);
-}
-
 // 更新画布背景颜色
-function updateCanvasBgColor(color) {
+function main_update_canvas_bg_color(color) {
     if (dom.canvasContainer) {
         dom.canvasContainer.style.backgroundColor = color;
     }
@@ -1588,7 +1263,7 @@ function updateCanvasBgColor(color) {
 
 let cachedMoveBoundScale = null;
 
-function updateMoveBound() {
+function main_update_move_bound() {
     if (cachedMoveBoundScale === state.scale) {
         return;
     }
@@ -1616,13 +1291,13 @@ function updateMoveBound() {
     }
 }
 
-function clampCanvasPosition() {
+function main_update_canvas_position() {
     const eps = 0.001;
     state.canvasX = Math.max(state.moveBound.minX - eps, Math.min(state.moveBound.maxX + eps, state.canvasX));
     state.canvasY = Math.max(state.moveBound.minY - eps, Math.min(state.moveBound.maxY + eps, state.canvasY));
 }
 
-function getVisibleRect() {
+function main_fetch_visible_rect() {
     if (cachedVisibleRectScale === state.scale && 
         cachedVisibleRectX === state.canvasX && 
         cachedVisibleRectY === state.canvasY && 
@@ -1660,7 +1335,7 @@ function getVisibleRect() {
 }
 
 // 检查笔画是否在可见区域内
-function isStrokeVisible(stroke, visibleRect) {
+function main_validate_stroke_visible(stroke, visibleRect) {
     if (!stroke.bounds) return true;
     
     return !(stroke.bounds.maxX < visibleRect.x ||
@@ -1670,29 +1345,29 @@ function isStrokeVisible(stroke, visibleRect) {
 }
 
 // 绑定所有事件
-function bindAllEvents() {
-    bindModeEvents();
-    bindToolEvents();
-    bindPenControlEvents();
-    bindCanvasMouseEvents();
-    bindCanvasTouchEvents();
-    bindSettingsEvents();
-    bindClickOutside();
+function main_setup_all_events() {
+    main_setup_mode_events();
+    main_setup_tool_events();
+    main_setup_pen_control_events();
+    main_setup_canvas_mouse_events();
+    main_setup_canvas_touch_events();
+    main_setup_settings_events();
+    main_setup_click_outside();
 }
 
 // 设置面板事件
-function bindSettingsEvents() {
+function main_setup_settings_events() {
     document.getElementById('btnRotateLeft')?.addEventListener('click', () => {
-        rotateImage('left');
+        main_update_image_rotation('left');
     });
     
     document.getElementById('btnRotateRight')?.addEventListener('click', () => {
-        rotateImage('right');
+        main_update_image_rotation('right');
     });
 }
 
 // 点击外部关闭面板
-function bindClickOutside() {
+function main_setup_click_outside() {
     document.addEventListener('click', (e) => {
         const panel = dom.penControlPanel;
         const isClickInsidePanel = panel.contains(e.target);
@@ -1700,7 +1375,7 @@ function bindClickOutside() {
         const isClickOnBtnEraser = dom.btnEraser.contains(e.target);
         
         if (!isClickInsidePanel && !isClickOnBtnComment && !isClickOnBtnEraser) {
-            hidePenControlPanel();
+            main_hide_pen_control_panel();
         }
         
         const settingsPanel = dom.settingsPanel;
@@ -1708,33 +1383,33 @@ function bindClickOutside() {
         const isClickOnBtnSettings = dom.btnSettings.contains(e.target);
         
         if (!isClickInsideSettings && !isClickOnBtnSettings) {
-            hideSettingsPanel();
+            main_hide_settings_panel();
         }
     });
 }
 
 // 模式切换事件
-function bindModeEvents() {
-    dom.btnMove.addEventListener('click', () => switchMode('move'));
-    dom.btnComment.addEventListener('click', () => switchMode('comment'));
-    dom.btnEraser.addEventListener('click', () => switchMode('eraser'));
+function main_setup_mode_events() {
+    dom.btnMove.addEventListener('click', () => main_update_mode('move'));
+    dom.btnComment.addEventListener('click', () => main_update_mode('comment'));
+    dom.btnEraser.addEventListener('click', () => main_update_mode('eraser'));
     
     dom.btnComment.addEventListener('dblclick', (e) => {
         e.preventDefault();
-        showPenControlPanel(dom.btnComment, 'comment');
+        main_show_pen_control_panel(dom.btnComment, 'comment');
     });
     
     dom.btnEraser.addEventListener('dblclick', (e) => {
         e.preventDefault();
-        showPenControlPanel(dom.btnEraser, 'eraser');
+        main_show_pen_control_panel(dom.btnEraser, 'eraser');
     });
 }
 
 // 切换模式
-function switchMode(mode) {
+function main_update_mode(mode) {
     state.drawMode = mode;
     
-    hidePenControlPanel();
+    main_hide_pen_control_panel();
     
     [dom.btnMove, dom.btnComment, dom.btnEraser].forEach(btn => {
         btn.classList.remove('primary-btn');
@@ -1746,21 +1421,21 @@ function switchMode(mode) {
         case 'move':
             dom.btnMove.classList.add('primary-btn');
             dom.drawCanvas.style.cursor = 'grab';
-            hideEraserHint();
+            main_hide_eraser_hint();
             break;
         case 'comment':
             dom.btnComment.classList.add('primary-btn');
             dom.drawCanvas.classList.add('drawing');
             dom.drawCanvas.style.cursor = 'crosshair';
-            hideEraserHint();
-            setPenStyle();
+            main_hide_eraser_hint();
+            main_update_pen_style();
             break;
         case 'eraser':
             dom.btnEraser.classList.add('primary-btn');
             dom.drawCanvas.classList.add('eraser');
             dom.drawCanvas.style.cursor = 'none';
-            showEraserHint();
-            setEraserStyle();
+            main_show_eraser_hint();
+            main_update_eraser_style();
             break;
     }
     
@@ -1768,20 +1443,20 @@ function switchMode(mode) {
 }
 
 // 工具按钮事件
-function bindToolEvents() {
-    dom.btnUndo.addEventListener('click', undo);
-    dom.btnClear.addEventListener('click', clearAllDrawings);
-    dom.btnPhoto.addEventListener('click', takePhoto);
-    dom.btnSettings.addEventListener('click', openSettings);
-    dom.btnSave.addEventListener('click', toggleFileSidebar);
-    dom.btnMinimize.addEventListener('click', minimizeWindow);
-    dom.btnMenu.addEventListener('click', toggleMenu);
-    dom.btnDocScan.addEventListener('click', openDocScanWindow);
-    dom.btnExpand.addEventListener('click', toggleSidebar);
+function main_setup_tool_events() {
+    dom.btnUndo.addEventListener('click', main_handle_undo);
+    dom.btnClear.addEventListener('click', main_delete_all_drawings);
+    dom.btnPhoto.addEventListener('click', main_save_photo);
+    dom.btnSettings.addEventListener('click', main_show_settings);
+    dom.btnSave.addEventListener('click', main_handle_file_sidebar_toggle);
+    dom.btnMinimize.addEventListener('click', main_hide_window);
+    dom.btnMenu.addEventListener('click', main_handle_menu_toggle);
+    dom.btnDocScan.addEventListener('click', main_show_doc_scan_window);
+    dom.btnExpand.addEventListener('click', main_handle_sidebar_toggle);
 }
 
 // 打开文档扫描窗口
-async function openDocScanWindow() {
+async function main_show_doc_scan_window() {
     try {
         if (!window.__TAURI__) {
             alert('文档扫描功能需要Tauri环境');
@@ -1789,7 +1464,7 @@ async function openDocScanWindow() {
         }
         
         const { invoke } = window.__TAURI__.core;
-        await invoke('open_doc_scan_window');
+            await invoke('window_show_doc_scan');
     } catch (error) {
         console.error('打开文档扫描窗口失败:', error);
         alert('打开文档扫描窗口失败: ' + error.message);
@@ -1797,72 +1472,72 @@ async function openDocScanWindow() {
 }
 
 // 菜单弹出
-function toggleMenu() {
+function main_handle_menu_toggle() {
     const existingMenu = document.getElementById('menuPopup');
     if (existingMenu) {
-        closeMenu();
+        main_hide_menu();
     } else {
-        showMenu();
+        main_show_menu();
     }
 }
 
-function showMenu() {
+function main_show_menu() {
     const menuPopup = document.createElement('div');
     menuPopup.id = 'menuPopup';
     menuPopup.className = 'menu-popup';
     menuPopup.innerHTML = `
         <button class="menu-item" id="menuSettings">
-            ${ThemeManager.getIcon('settings', { alt: window.i18n?.t('toolbar.settings') || '设置' })}
-            ${window.i18n?.t('toolbar.settings') || '设置'}
+            ${ThemeManager.theme_fetch_icon('settings', { alt: window.i18n?.format_translate('toolbar.settings') || '设置' })}
+            ${window.i18n?.format_translate('toolbar.settings') || '设置'}
         </button>
         <button class="menu-item" id="menuClose">
-            ${ThemeManager.getIcon('close', { alt: window.i18n?.t('common.close') || '关闭' })}
-            ${window.i18n?.t('common.close') || '关闭'}
+            ${ThemeManager.theme_fetch_icon('close', { alt: window.i18n?.format_translate('common.close') || '关闭' })}
+            ${window.i18n?.format_translate('common.close') || '关闭'}
         </button>
     `;
     
     dom.canvasContainer.appendChild(menuPopup);
     
     document.getElementById('menuSettings').addEventListener('click', () => {
-        closeMenu();
-        openSettingsWindow();
+        main_hide_menu();
+        main_show_settings_window();
     });
     
     document.getElementById('menuClose').addEventListener('click', () => {
-        closeMenu();
-        closeWindow();
+        main_hide_menu();
+        main_submit_close_window();
     });
     
     setTimeout(() => {
-        document.addEventListener('click', handleMenuOutsideClick);
+        document.addEventListener('click', main_handle_menu_outside_click);
     }, 0);
 }
 
-function closeMenu() {
+function main_hide_menu() {
     const menuPopup = document.getElementById('menuPopup');
     if (menuPopup) {
         menuPopup.remove();
     }
-    document.removeEventListener('click', handleMenuOutsideClick);
+    document.removeEventListener('click', main_handle_menu_outside_click);
 }
 
-function handleMenuOutsideClick(e) {
+function main_handle_menu_outside_click(e) {
     const menuPopup = document.getElementById('menuPopup');
     const btnMenu = dom.btnMenu;
     
     if (menuPopup && !menuPopup.contains(e.target) && !btnMenu.contains(e.target)) {
-        closeMenu();
+        main_hide_menu();
     }
 }
 
 // 最小化窗口
-async function minimizeWindow() {
-    if (getCurrentWindow) {
-        const appWindow = getCurrentWindow();
+async function main_hide_window() {
+    if (window.__TAURI__?.window?.getCurrentWindow) {
+        const appWindow = window.__TAURI__.window.getCurrentWindow();
         
         // 如果摄像头开启，先关闭摄像头
         if (state.isCameraOpen) {
-            await setCameraState(false);
+            await main_update_camera_state(false);
             state.wasCameraOpenBeforeMinimize = true;
             console.log('摄像头已关闭（最小化）');
         }
@@ -1875,17 +1550,17 @@ async function minimizeWindow() {
 }
 
 // 监听窗口最小化和恢复事件
-function setupWindowMinimizeListeners() {
+function main_setup_minimize_listeners() {
     if (window.__TAURI__) {
         const { getCurrentWindow } = window.__TAURI__.window;
         
         let isRestoring = false;
         
-        const handleRestore = async () => {
+        const main_handle_restore = async () => {
             if (isRestoring) return;
             isRestoring = true;
             try {
-                await restoreCameraIfNeeded();
+                await main_init_camera_if_needed();
             } finally {
                 setTimeout(() => {
                     isRestoring = false;
@@ -1893,18 +1568,18 @@ function setupWindowMinimizeListeners() {
             }
         };
         
-        getCurrentWindow().listen('tauri://restore', handleRestore);
-        getCurrentWindow().listen('tauri://show', handleRestore);
-        getCurrentWindow().listen('tauri://focus', handleRestore);
+        getCurrentWindow().listen('tauri://restore', main_handle_restore);
+        getCurrentWindow().listen('tauri://show', main_handle_restore);
+        getCurrentWindow().listen('tauri://focus', main_handle_restore);
     }
 }
 
 // 恢复摄像头（如果需要）
-async function restoreCameraIfNeeded() {
+async function main_init_camera_if_needed() {
     // 如果之前摄像头是开启的，重新开启摄像头
     if (state.wasCameraOpenBeforeMinimize && !state.isCameraOpen) {
         try {
-            await setCameraState(true);
+            await main_update_camera_state(true);
             console.log('摄像头已重新开启');
             // 只有在成功开启后才重置状态
             state.wasCameraOpenBeforeMinimize = false;
@@ -1916,9 +1591,9 @@ async function restoreCameraIfNeeded() {
 }
 
 // 关闭窗口
-async function closeWindow() {
-    if (getCurrentWindow) {
-        const appWindow = getCurrentWindow();
+async function main_submit_close_window() {
+    if (window.__TAURI__?.window?.getCurrentWindow) {
+        const appWindow = window.__TAURI__.window.getCurrentWindow();
         await appWindow.close();
         console.log('窗口已关闭');
     } else {
@@ -1927,19 +1602,19 @@ async function closeWindow() {
 }
 
 // 笔触控制事件
-function bindPenControlEvents() {
-    initTriangleSlider(dom.penSizeSliderWrapper, dom.penSizeThumb, dom.penSizeValue, 2, 21, DRAW_CONFIG.penWidth, (value) => {
+function main_setup_pen_control_events() {
+    main_init_triangle_slider(dom.penSizeSliderWrapper, dom.penSizeThumb, dom.penSizeValue, 2, 21, DRAW_CONFIG.penWidth, (value) => {
         DRAW_CONFIG.penWidth = value;
         if (state.drawMode === 'comment') {
-            setPenStyle();
+            main_update_pen_style();
         }
     });
     
-    initTriangleSlider(dom.eraserSizeSliderWrapper, dom.eraserSizeThumb, dom.eraserSizeValue, 5, 50, DRAW_CONFIG.eraserSize, (value) => {
+    main_init_triangle_slider(dom.eraserSizeSliderWrapper, dom.eraserSizeThumb, dom.eraserSizeValue, 5, 50, DRAW_CONFIG.eraserSize, (value) => {
         DRAW_CONFIG.eraserSize = value;
-        updateEraserHintSize();
+        main_update_eraser_hint_size();
         if (state.drawMode === 'eraser') {
-            setEraserStyle();
+            main_update_eraser_style();
         }
     });
     
@@ -1957,18 +1632,18 @@ function bindPenControlEvents() {
                 btn.classList.add('active');
                 
                 if (state.drawMode === 'comment') {
-                    setPenStyle();
+                    main_update_pen_style();
                 }
             }
         });
     });
     
     // 初始化颜色按钮
-    updateColorButtons();
+    main_update_color_buttons();
 }
 
 // 初始化三角形滑块
-function initTriangleSlider(wrapper, thumb, valueLabel, minValue, maxValue, initialValue, onChange) {
+function main_init_triangle_slider(wrapper, thumb, valueLabel, minValue, maxValue, initialValue, onChange) {
     const wrapperHeight = 50;
     const thumbHeight = 18;
     const validHeight = wrapperHeight - thumbHeight;
@@ -1976,60 +1651,60 @@ function initTriangleSlider(wrapper, thumb, valueLabel, minValue, maxValue, init
     let currentValue = initialValue;
     let isDragging = false;
     
-    function updateThumbPosition() {
+    function main_update_thumb_position() {
         const ratio = (currentValue - minValue) / (maxValue - minValue);
         const top = (1 - ratio) * validHeight;
         thumb.style.top = `${top}px`;
         valueLabel.textContent = `${currentValue}px`;
     }
     
-    function getPositionFromEvent(e) {
+    function main_fetch_position_from_event(e) {
         if (e.touches && e.touches.length > 0) {
             return e.touches[0].clientY;
         }
         return e.clientY;
     }
     
-    function onDrag(e) {
+    function main_handle_drag(e) {
         if (!isDragging) return;
         e.preventDefault();
-        const clientY = getPositionFromEvent(e);
+        const clientY = main_fetch_position_from_event(e);
         const mouseY = clientY - wrapper.getBoundingClientRect().top;
         const clampedY = Math.max(0, Math.min(mouseY, validHeight));
         const ratio = 1 - (clampedY / validHeight);
         currentValue = Math.round(minValue + ratio * (maxValue - minValue));
-        updateThumbPosition();
+        main_update_thumb_position();
         if (onChange) onChange(currentValue);
     }
     
-    function stopDrag() {
+    function main_submit_drag() {
         isDragging = false;
-        document.removeEventListener('mousemove', onDrag);
-        document.removeEventListener('mouseup', stopDrag);
-        document.removeEventListener('touchmove', onDrag);
-        document.removeEventListener('touchend', stopDrag);
-        document.removeEventListener('touchcancel', stopDrag);
+        document.removeEventListener('mousemove', main_handle_drag);
+        document.removeEventListener('mouseup', main_submit_drag);
+        document.removeEventListener('touchmove', main_handle_drag);
+        document.removeEventListener('touchend', main_submit_drag);
+        document.removeEventListener('touchcancel', main_submit_drag);
     }
     
-    function startDrag(e) {
+    function main_start_drag(e) {
         e.preventDefault();
         isDragging = true;
-        document.addEventListener('mousemove', onDrag);
-        document.addEventListener('mouseup', stopDrag);
-        document.addEventListener('touchmove', onDrag, { passive: false });
-        document.addEventListener('touchend', stopDrag);
-        document.addEventListener('touchcancel', stopDrag);
+        document.addEventListener('mousemove', main_handle_drag);
+        document.addEventListener('mouseup', main_submit_drag);
+        document.addEventListener('touchmove', main_handle_drag, { passive: false });
+        document.addEventListener('touchend', main_submit_drag);
+        document.addEventListener('touchcancel', main_submit_drag);
     }
     
-    thumb.addEventListener('mousedown', startDrag);
-    thumb.addEventListener('touchstart', startDrag, { passive: false });
+    thumb.addEventListener('mousedown', main_start_drag);
+    thumb.addEventListener('touchstart', main_start_drag, { passive: false });
     
     wrapper.addEventListener('click', (e) => {
         if (isDragging) return;
         const clickY = e.clientY - wrapper.getBoundingClientRect().top;
         const ratio = 1 - Math.max(0, Math.min(clickY / validHeight, 1));
         currentValue = Math.round(minValue + ratio * (maxValue - minValue));
-        updateThumbPosition();
+        main_update_thumb_position();
         if (onChange) onChange(currentValue);
     });
     
@@ -2039,15 +1714,15 @@ function initTriangleSlider(wrapper, thumb, valueLabel, minValue, maxValue, init
         const clickY = touch.clientY - wrapper.getBoundingClientRect().top;
         const ratio = 1 - Math.max(0, Math.min(clickY / validHeight, 1));
         currentValue = Math.round(minValue + ratio * (maxValue - minValue));
-        updateThumbPosition();
+        main_update_thumb_position();
         if (onChange) onChange(currentValue);
     }, { passive: true });
     
-    updateThumbPosition();
+    main_update_thumb_position();
 }
 
 // RGB转十六进制颜色
-function rgbToHex(r, g, b) {
+function main_calc_rgb_to_hex(r, g, b) {
     return '#' + [r, g, b].map(x => {
         const hex = x.toString(16);
         return hex.length === 1 ? '0' + hex : hex;
@@ -2055,7 +1730,7 @@ function rgbToHex(r, g, b) {
 }
 
 // 十六进制颜色转RGB
-function hexToRgb(hex) {
+function main_calc_hex_to_rgb(hex) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return result ? {
         r: parseInt(result[1], 16),
@@ -2064,13 +1739,13 @@ function hexToRgb(hex) {
     } : null;
 }
 
-function updateColorButtons() {
+function main_update_color_buttons() {
     const colorButtons = document.querySelectorAll('.pen-color-btn');
     colorButtons.forEach((btn, index) => {
         if (DRAW_CONFIG.penColors[index]) {
             btn.dataset.color = DRAW_CONFIG.penColors[index];
             btn.style.backgroundColor = DRAW_CONFIG.penColors[index];
-            btn.title = window.i18n?.t('settings.colorN', { n: index + 1 }) || `颜色${index + 1}`;
+            btn.title = window.i18n?.format_translate('settings.colorN', { n: index + 1 }) || `颜色${index + 1}`;
             
             if (DRAW_CONFIG.penColors[index].toLowerCase() === '#000000') {
                 btn.classList.add('dark-color');
@@ -2085,10 +1760,10 @@ function updateColorButtons() {
             }
         }
     });
-    updateColorButtonActive();
+    main_update_color_button_active();
 }
 
-function updateColorButtonActive() {
+function main_update_color_button_active() {
     const colorButtons = document.querySelectorAll('.pen-color-btn');
     colorButtons.forEach(btn => {
         btn.classList.remove('active');
@@ -2099,9 +1774,9 @@ function updateColorButtonActive() {
 }
 
 // 设置笔触样式
-function setPenStyle() {
+function main_update_pen_style() {
     const dc = dom.drawCtx;
-    const scale = getSafeScale();
+    const scale = main_fetch_safe_scale();
     dc.strokeStyle = DRAW_CONFIG.penColor;
     dc.lineWidth = DRAW_CONFIG.penWidth / scale;
     dc.lineCap = 'round';
@@ -2110,9 +1785,9 @@ function setPenStyle() {
     dc.globalCompositeOperation = 'source-over';
 }
 
-function setEraserStyle() {
+function main_update_eraser_style() {
     const dc = dom.drawCtx;
-    const scale = getSafeScale();
+    const scale = main_fetch_safe_scale();
     dc.lineWidth = DRAW_CONFIG.eraserSize / scale;
     dc.lineCap = 'round';
     dc.lineJoin = 'round';
@@ -2120,31 +1795,31 @@ function setEraserStyle() {
     dc.globalCompositeOperation = 'destination-out';
 }
 
-function startDrawingMode() {
+function main_start_drawing_mode() {
     dom.canvasWrapper.classList.add('drawing');
 }
 
-function endDrawingMode() {
+function main_hide_drawing_mode() {
     dom.canvasWrapper.classList.remove('drawing');
 }
 
 // 橡皮提示框
-function updateEraserHintSize() {
+function main_update_eraser_hint_size() {
     const size = DRAW_CONFIG.eraserSize;
     // 橡皮擦大小基于 Canvas 坐标系，显示时需要考虑缩放
     dom.eraserHint.style.width = `${size}px`;
     dom.eraserHint.style.height = `${size}px`;
 }
 
-function showEraserHint() {
+function main_show_eraser_hint() {
     dom.eraserHint.classList.add('active');
 }
 
-function hideEraserHint() {
+function main_hide_eraser_hint() {
     dom.eraserHint.classList.remove('active');
 }
 
-function showPenControlPanel(targetBtn, mode) {
+function main_show_pen_control_panel(targetBtn, mode) {
     const panel = dom.penControlPanel;
     const btnRect = targetBtn.getBoundingClientRect();
     const containerRect = document.querySelector('.main-function').getBoundingClientRect();
@@ -2201,7 +1876,7 @@ function showPenControlPanel(targetBtn, mode) {
     panel.classList.add('visible');
 }
 
-function hidePenControlPanel() {
+function main_hide_pen_control_panel() {
     const panel = dom.penControlPanel;
     if (!panel.classList.contains('visible')) return;
     panel.classList.remove('visible');
@@ -2212,7 +1887,7 @@ function hidePenControlPanel() {
 let eraserHintRafId = null;
 let eraserHintPendingPos = null;
 
-function updateEraserHintPos(clientX, clientY) {
+function main_update_eraser_hint_position(clientX, clientY) {
     eraserHintPendingPos = { clientX, clientY };
     
     if (eraserHintRafId !== null) return;
@@ -2224,7 +1899,7 @@ function updateEraserHintPos(clientX, clientY) {
         const { clientX, clientY } = eraserHintPendingPos;
         eraserHintPendingPos = null;
         
-        const rect = getCachedCanvasRect();
+        const rect = main_fetch_cached_canvas_rect();
         const x = clientX - rect.left;
         const y = clientY - rect.top;
         dom.eraserHint.style.left = `${x}px`;
@@ -2236,28 +1911,28 @@ function updateEraserHintPos(clientX, clientY) {
 // ==================== 画布交互事件 ====================
 // 鼠标、触控事件处理：绘制、拖拽、缩放
 
-function bindCanvasMouseEvents() {
+function main_setup_canvas_mouse_events() {
     // 优先使用 Pointer Events（支持压感）
     if (window.PointerEvent) {
-        dom.drawCanvas.addEventListener('pointerdown', handlePointerDown);
-        dom.drawCanvas.addEventListener('pointermove', handlePointerMove);
-        dom.drawCanvas.addEventListener('pointerup', handlePointerUp);
-        dom.drawCanvas.addEventListener('pointerleave', handlePointerLeave);
-        dom.drawCanvas.addEventListener('pointercancel', handlePointerUp);
+        dom.drawCanvas.addEventListener('pointerdown', main_handle_pointer_down);
+        dom.drawCanvas.addEventListener('pointermove', main_handle_pointer_move);
+        dom.drawCanvas.addEventListener('pointerup', main_handle_pointer_up);
+        dom.drawCanvas.addEventListener('pointerleave', main_handle_pointer_leave);
+        dom.drawCanvas.addEventListener('pointercancel', main_handle_pointer_up);
     } else {
         // 降级到传统鼠标事件
-        dom.drawCanvas.addEventListener('mousedown', handleMouseDown);
-        dom.drawCanvas.addEventListener('mousemove', handleMouseMove);
-        dom.drawCanvas.addEventListener('mouseup', handleMouseUp);
-        dom.drawCanvas.addEventListener('mouseleave', handleMouseLeave);
+        dom.drawCanvas.addEventListener('mousedown', main_handle_mouse_down);
+        dom.drawCanvas.addEventListener('mousemove', main_handle_mouse_move);
+        dom.drawCanvas.addEventListener('mouseup', main_handle_mouse_up);
+        dom.drawCanvas.addEventListener('mouseleave', main_handle_mouse_leave);
     }
-    dom.drawCanvas.addEventListener('wheel', handleWheel, { passive: false });
+    dom.drawCanvas.addEventListener('wheel', main_handle_wheel, { passive: false });
 }
 
 /**
  * Pointer 按下处理
  */
-function handlePointerDown(e) {
+function main_handle_pointer_down(e) {
     e.preventDefault();
     state.drawCanvasRect = dom.drawCanvas.getBoundingClientRect();
     
@@ -2270,47 +1945,47 @@ function handlePointerDown(e) {
         dom.canvasWrapper.classList.add('dragging');
         dom.drawCanvas.classList.add('dragging');
     } else if (state.drawMode === 'comment') {
-        hidePenControlPanel();
+        main_hide_pen_control_panel();
         state.isDrawing = true;
-        startDrawingMode();
-        state.cachedInvScale = 1 / getSafeScale();
+        main_start_drawing_mode();
+        state.cachedInvScale = 1 / main_fetch_safe_scale();
         state.lastX = (e.clientX - state.drawCanvasRect.left) * state.cachedInvScale;
         state.lastY = (e.clientY - state.drawCanvasRect.top) * state.cachedInvScale;
-        startStroke('draw');
+        main_start_stroke('draw');
     } else if (state.drawMode === 'eraser') {
-        hidePenControlPanel();
+        main_hide_pen_control_panel();
         state.isDrawing = true;
-        startDrawingMode();
-        state.cachedInvScale = 1 / getSafeScale();
+        main_start_drawing_mode();
+        state.cachedInvScale = 1 / main_fetch_safe_scale();
         state.lastX = (e.clientX - state.drawCanvasRect.left) * state.cachedInvScale;
         state.lastY = (e.clientY - state.drawCanvasRect.top) * state.cachedInvScale;
-        startStroke('erase');
+        main_start_stroke('erase');
     }
 }
 
 /**
  * Pointer 移动处理
  */
-function handlePointerMove(e) {
+function main_handle_pointer_move(e) {
     e.preventDefault();
     
     state.currentPressure = e.pressure || 0.5;
     
     if (state.drawMode === 'eraser') {
-        updateEraserHintPos(e.clientX, e.clientY);
+        main_update_eraser_hint_position(e.clientX, e.clientY);
     }
     
     if (state.isDragging) {
         state.canvasX = e.clientX - state.startDragX;
         state.canvasY = e.clientY - state.startDragY;
-        clampCanvasPosition();
+        main_update_canvas_position();
         
         const transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
         dom.canvasWrapper.style.transform = transform;
         
-        lastCanvasTransform.x = state.canvasX;
-        lastCanvasTransform.y = state.canvasY;
-        lastCanvasTransform.scale = state.scale;
+        last_canvas_transform.x = state.canvasX;
+        last_canvas_transform.y = state.canvasY;
+        last_canvas_transform.scale = state.scale;
     } else if (state.isDrawing) {
         const rect = state.drawCanvasRect;
         const invScale = state.cachedInvScale;
@@ -2322,9 +1997,9 @@ function handlePointerMove(e) {
         const distSq = dx * dx + dy * dy;
         
         if (distSq > 1) {
-            addStrokePoint(state.lastX, state.lastY, x, y, state.currentPressure);
+            main_save_stroke_point(state.lastX, state.lastY, x, y, state.currentPressure);
             
-            batchDrawManager.addCommand(
+            batchDrawManager.batch_draw_create_command(
                 state.cachedDrawType, 
                 state.lastX, 
                 state.lastY, 
@@ -2343,7 +2018,7 @@ function handlePointerMove(e) {
 /**
  * Pointer 抬起处理
  */
-async function handlePointerUp(e) {
+async function main_handle_pointer_up(e) {
     if (state.isDragging) {
         state.isDragging = false;
         dom.canvasWrapper.classList.remove('dragging');
@@ -2351,38 +2026,38 @@ async function handlePointerUp(e) {
     }
     if (state.isDrawing) {
         state.isDrawing = false;
-        endDrawingMode();
+        main_hide_drawing_mode();
         if (state.drawRafId) {
             cancelAnimationFrame(state.drawRafId);
             state.drawRafId = null;
         }
-        await endStroke();
+        await main_submit_stroke();
     }
 }
 
 /**
  * Pointer 离开处理
  */
-async function handlePointerLeave(e) {
+async function main_handle_pointer_leave(e) {
     if (state.isDragging) {
         state.isDragging = false;
         dom.drawCanvas.classList.remove('dragging');
     }
     if (state.isDrawing) {
         state.isDrawing = false;
-        endDrawingMode();
+        main_hide_drawing_mode();
         if (state.drawRafId) {
             cancelAnimationFrame(state.drawRafId);
             state.drawRafId = null;
         }
-        await endStroke();
+        await main_submit_stroke();
     }
 }
 
 /**
  * 鼠标按下处理
  */
-function handleMouseDown(e) {
+function main_handle_mouse_down(e) {
     e.preventDefault();
     state.drawCanvasRect = dom.drawCanvas.getBoundingClientRect();
     
@@ -2393,45 +2068,45 @@ function handleMouseDown(e) {
         dom.canvasWrapper.classList.add('dragging');
         dom.drawCanvas.classList.add('dragging');
     } else if (state.drawMode === 'comment') {
-        hidePenControlPanel();
+        main_hide_pen_control_panel();
         state.isDrawing = true;
-        startDrawingMode();
-        state.cachedInvScale = 1 / getSafeScale();
+        main_start_drawing_mode();
+        state.cachedInvScale = 1 / main_fetch_safe_scale();
         state.lastX = (e.clientX - state.drawCanvasRect.left) * state.cachedInvScale;
         state.lastY = (e.clientY - state.drawCanvasRect.top) * state.cachedInvScale;
-        startStroke('draw');
+        main_start_stroke('draw');
     } else if (state.drawMode === 'eraser') {
-        hidePenControlPanel();
+        main_hide_pen_control_panel();
         state.isDrawing = true;
-        startDrawingMode();
-        state.cachedInvScale = 1 / getSafeScale();
+        main_start_drawing_mode();
+        state.cachedInvScale = 1 / main_fetch_safe_scale();
         state.lastX = (e.clientX - state.drawCanvasRect.left) * state.cachedInvScale;
         state.lastY = (e.clientY - state.drawCanvasRect.top) * state.cachedInvScale;
-        startStroke('erase');
+        main_start_stroke('erase');
     }
 }
 
 /**
  * 鼠标移动处理
  */
-function handleMouseMove(e) {
+function main_handle_mouse_move(e) {
     e.preventDefault();
     
     if (state.drawMode === 'eraser') {
-        updateEraserHintPos(e.clientX, e.clientY);
+        main_update_eraser_hint_position(e.clientX, e.clientY);
     }
     
     if (state.isDragging) {
         state.canvasX = e.clientX - state.startDragX;
         state.canvasY = e.clientY - state.startDragY;
-        clampCanvasPosition();
+        main_update_canvas_position();
         
         const transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
         dom.canvasWrapper.style.transform = transform;
         
-        lastCanvasTransform.x = state.canvasX;
-        lastCanvasTransform.y = state.canvasY;
-        lastCanvasTransform.scale = state.scale;
+        last_canvas_transform.x = state.canvasX;
+        last_canvas_transform.y = state.canvasY;
+        last_canvas_transform.scale = state.scale;
     } else if (state.isDrawing) {
         const rect = state.drawCanvasRect;
         const invScale = state.cachedInvScale;
@@ -2443,9 +2118,9 @@ function handleMouseMove(e) {
         const distSq = dx * dx + dy * dy;
         
         if (distSq > 1) {
-            addStrokePoint(state.lastX, state.lastY, x, y);
+            main_save_stroke_point(state.lastX, state.lastY, x, y);
             
-            batchDrawManager.addCommand(
+            batchDrawManager.batch_draw_create_command(
                 state.cachedDrawType, 
                 state.lastX, 
                 state.lastY, 
@@ -2461,7 +2136,7 @@ function handleMouseMove(e) {
     }
 }
 
-async function handleMouseUp(e) {
+async function main_handle_mouse_up(e) {
     if (state.isDragging) {
         state.isDragging = false;
         dom.canvasWrapper.classList.remove('dragging');
@@ -2469,12 +2144,12 @@ async function handleMouseUp(e) {
     }
     if (state.isDrawing) {
         state.isDrawing = false;
-        endDrawingMode();
-        await endStroke();
+        main_hide_drawing_mode();
+        await main_submit_stroke();
     }
 }
 
-async function handleMouseLeave(e) {
+async function main_handle_mouse_leave(e) {
     if (state.isDragging) {
         state.isDragging = false;
         dom.canvasWrapper.classList.remove('dragging');
@@ -2482,19 +2157,19 @@ async function handleMouseLeave(e) {
     }
     if (state.isDrawing) {
         state.isDrawing = false;
-        endDrawingMode();
-        await endStroke();
+        main_hide_drawing_mode();
+        await main_submit_stroke();
     }
 }
 
-function handleWheel(e) {
+function main_handle_wheel(e) {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     const maxScale = state.isCameraOpen ? DRAW_CONFIG.maxScaleCamera : DRAW_CONFIG.maxScaleImage;
     const newScale = Math.max(DRAW_CONFIG.minScale, Math.min(maxScale, state.scale + delta));
     
     if (newScale !== state.scale) {
-        const containerRect = getCachedCanvasRect();
+        const containerRect = main_fetch_cached_canvas_rect();
         const mouseX = e.clientX - containerRect.left;
         const mouseY = e.clientY - containerRect.top;
         
@@ -2508,21 +2183,21 @@ function handleWheel(e) {
         state.canvasX = targetX;
         state.canvasY = targetY;
         
-        updateMoveBound();
-        clampCanvasPosition();
-        animateCanvasTransform(state.canvasX, state.canvasY, state.scale, 100);
+        main_update_move_bound();
+        main_update_canvas_position();
+        main_update_canvas_transform_smooth(state.canvasX, state.canvasY, state.scale, 100);
     }
 }
 
 // 画布触控事件
-function bindCanvasTouchEvents() {
-    dom.drawCanvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-    dom.drawCanvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-    dom.drawCanvas.addEventListener('touchend', handleTouchEnd, { passive: false });
-    dom.drawCanvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+function main_setup_canvas_touch_events() {
+    dom.drawCanvas.addEventListener('touchstart', main_handle_touch_start, { passive: false });
+    dom.drawCanvas.addEventListener('touchmove', main_handle_touch_move, { passive: false });
+    dom.drawCanvas.addEventListener('touchend', main_handle_touch_end, { passive: false });
+    dom.drawCanvas.addEventListener('touchcancel', main_handle_touch_end, { passive: false });
 }
 
-function handleTouchStart(e) {
+function main_handle_touch_start(e) {
     e.preventDefault();
     const touches = e.touches;
     state.drawCanvasRect = dom.drawCanvas.getBoundingClientRect();
@@ -2537,25 +2212,25 @@ function handleTouchStart(e) {
             dom.drawCanvas.classList.add('dragging');
         } else if (state.drawMode === 'comment') {
             state.isDrawing = true;
-            startDrawingMode();
-            state.cachedInvScale = 1 / getSafeScale();
+            main_start_drawing_mode();
+            state.cachedInvScale = 1 / main_fetch_safe_scale();
             state.lastX = (touch.clientX - state.drawCanvasRect.left) * state.cachedInvScale;
             state.lastY = (touch.clientY - state.drawCanvasRect.top) * state.cachedInvScale;
-            startStroke('draw');
+            main_start_stroke('draw');
         } else if (state.drawMode === 'eraser') {
             state.isDrawing = true;
-            startDrawingMode();
-            updateEraserHintPos(touch.clientX, touch.clientY);
-            state.cachedInvScale = 1 / getSafeScale();
+            main_start_drawing_mode();
+            main_update_eraser_hint_position(touch.clientX, touch.clientY);
+            state.cachedInvScale = 1 / main_fetch_safe_scale();
             state.lastX = (touch.clientX - state.drawCanvasRect.left) * state.cachedInvScale;
             state.lastY = (touch.clientY - state.drawCanvasRect.top) * state.cachedInvScale;
-            startStroke('erase');
+            main_start_stroke('erase');
         }
     } else if (touches.length === 2) {
         state.isScaling = true;
         state.isDragging = false;
         state.isDrawing = false;
-        state.startDistanceSq = getTouchDistanceSq(touches[0], touches[1]);
+        state.startDistanceSq = main_calc_touch_distance_squared(touches[0], touches[1]);
         state.startScale = state.scale;
         state.startScaleX = (touches[0].clientX + touches[1].clientX) / 2;
         state.startScaleY = (touches[0].clientY + touches[1].clientY) / 2;
@@ -2565,7 +2240,7 @@ function handleTouchStart(e) {
     }
 }
 
-function handleTouchMove(e) {
+function main_handle_touch_move(e) {
     e.preventDefault();
     const touches = e.touches;
     
@@ -2573,18 +2248,18 @@ function handleTouchMove(e) {
         const touch = touches[0];
         state.canvasX = touch.clientX - state.startDragX;
         state.canvasY = touch.clientY - state.startDragY;
-        clampCanvasPosition();
+        main_update_canvas_position();
         
         const transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
         dom.canvasWrapper.style.transform = transform;
         
-        lastCanvasTransform.x = state.canvasX;
-        lastCanvasTransform.y = state.canvasY;
-        lastCanvasTransform.scale = state.scale;
+        last_canvas_transform.x = state.canvasX;
+        last_canvas_transform.y = state.canvasY;
+        last_canvas_transform.scale = state.scale;
     } else if (touches.length === 1 && state.isDrawing) {
         const touch = touches[0];
         if (state.drawMode === 'eraser') {
-            updateEraserHintPos(touch.clientX, touch.clientY);
+            main_update_eraser_hint_position(touch.clientX, touch.clientY);
         }
         
         const invScale = state.cachedInvScale;
@@ -2598,9 +2273,9 @@ function handleTouchMove(e) {
         const distSq = dx * dx + dy * dy;
         
         if (distSq > 1) {
-            addStrokePoint(state.lastX, state.lastY, x, y, pressure);
+            main_save_stroke_point(state.lastX, state.lastY, x, y, pressure);
             
-            batchDrawManager.addCommand(
+            batchDrawManager.batch_draw_create_command(
                 state.cachedDrawType, 
                 state.lastX, 
                 state.lastY, 
@@ -2614,7 +2289,7 @@ function handleTouchMove(e) {
             state.lastY = y;
         }
     } else if (touches.length === 2 && state.isScaling) {
-        const currentDistanceSq = getTouchDistanceSq(touches[0], touches[1]);
+        const currentDistanceSq = main_calc_touch_distance_squared(touches[0], touches[1]);
         const scaleRatio = Math.sqrt(currentDistanceSq / state.startDistanceSq);
         let newScale = state.startScale * scaleRatio;
         const maxScale = state.isCameraOpen ? DRAW_CONFIG.maxScaleCamera : DRAW_CONFIG.maxScaleImage;
@@ -2628,11 +2303,11 @@ function handleTouchMove(e) {
         state.canvasY = centerY - (state.startScaleY - state.startCanvasY) * finalRatio;
         state.scale = newScale;
         
-        scheduleTransformUpdate(state.canvasX, state.canvasY, state.scale);
+        main_update_transform_schedule(state.canvasX, state.canvasY, state.scale);
     }
 }
 
-async function handleTouchEnd(e) {
+async function main_handle_touch_end(e) {
     e.preventDefault();
     
     if (e.touches.length === 0) {
@@ -2641,23 +2316,23 @@ async function handleTouchEnd(e) {
         dom.canvasWrapper.classList.remove('dragging');
         dom.drawCanvas.classList.remove('dragging');
         
-        updateMoveBound();
-        clampCanvasPosition();
+        main_update_move_bound();
+        main_update_canvas_position();
         dom.canvasWrapper.style.transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
         
         if (state.isDrawing) {
             state.isDrawing = false;
-            endDrawingMode();
+            main_hide_drawing_mode();
             if (state.drawRafId) {
                 cancelAnimationFrame(state.drawRafId);
                 state.drawRafId = null;
             }
-            await endStroke();
+            await main_submit_stroke();
         }
     } else if (e.touches.length === 1) {
         state.isScaling = false;
-        updateMoveBound();
-        clampCanvasPosition();
+        main_update_move_bound();
+        main_update_canvas_position();
         dom.canvasWrapper.style.transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
         
         const touch = e.touches[0];
@@ -2669,28 +2344,28 @@ async function handleTouchEnd(e) {
     }
 }
 
-function getTouchDistanceSq(touch1, touch2) {
+function main_calc_touch_distance_squared(touch1, touch2) {
     const dx = touch2.clientX - touch1.clientX;
     const dy = touch2.clientY - touch1.clientY;
     return dx * dx + dy * dy;
 }
 
-function updateCanvasTransform() {
-    if (lastCanvasTransform.x === state.canvasX && 
-        lastCanvasTransform.y === state.canvasY && 
-        lastCanvasTransform.scale === state.scale) {
+function main_update_canvas_transform() {
+    if (last_canvas_transform.x === state.canvasX && 
+        last_canvas_transform.y === state.canvasY && 
+        last_canvas_transform.scale === state.scale) {
         return;
     }
     
-    lastCanvasTransform.x = state.canvasX;
-    lastCanvasTransform.y = state.canvasY;
-    lastCanvasTransform.scale = state.scale;
+    last_canvas_transform.x = state.canvasX;
+    last_canvas_transform.y = state.canvasY;
+    last_canvas_transform.scale = state.scale;
     
     const transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
     dom.canvasWrapper.style.transform = transform;
 }
 
-function animateCanvasTransform(targetX, targetY, targetScale, duration = 250) {
+function main_update_canvas_transform_smooth(targetX, targetY, targetScale, duration = 250) {
     if (currentAnimationId !== null) {
         clearTimeout(currentAnimationId);
         currentAnimationId = null;
@@ -2700,12 +2375,12 @@ function animateCanvasTransform(targetX, targetY, targetScale, duration = 250) {
     state.canvasY = targetY;
     state.scale = targetScale;
     
-    updateMoveBound();
-    clampCanvasPosition();
+    main_update_move_bound();
+    main_update_canvas_position();
     
-    lastCanvasTransform.x = state.canvasX;
-    lastCanvasTransform.y = state.canvasY;
-    lastCanvasTransform.scale = state.scale;
+    last_canvas_transform.x = state.canvasX;
+    last_canvas_transform.y = state.canvasY;
+    last_canvas_transform.scale = state.scale;
     
     dom.canvasWrapper.classList.add('smooth-transform');
     dom.canvasWrapper.style.transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
@@ -2717,7 +2392,7 @@ function animateCanvasTransform(targetX, targetY, targetScale, duration = 250) {
 }
 
 // 撤销功能 - 混合方案：路径记录 + ImageData 压缩
-function startStroke(type) {
+function main_start_stroke(type) {
     state.currentStroke = {
         type: type,
         points: [],
@@ -2742,10 +2417,10 @@ function startStroke(type) {
     state.cachedDrawColor = type === 'draw' ? DRAW_CONFIG.penColor : '#000000';
     state.cachedDrawLineWidth = type === 'draw' ? DRAW_CONFIG.penWidth : DRAW_CONFIG.eraserSize;
     
-    batchDrawManager.startDrawing();
+    batchDrawManager.batch_draw_init_start();
 }
 
-function addStrokePoint(fromX, fromY, toX, toY, pressure = 0.5) {
+function main_save_stroke_point(fromX, fromY, toX, toY, pressure = 0.5) {
     const stroke = state.currentStroke;
     if (!stroke) return;
     
@@ -2769,40 +2444,40 @@ function addStrokePoint(fromX, fromY, toX, toY, pressure = 0.5) {
     points.push({ fromX, fromY, toX, toY });
 }
 
-async function endStroke() {
+async function main_submit_stroke() {
     if (state.currentStroke && state.currentStroke.points.length > 0) {
         if (state.currentStroke.type === 'erase') {
-            await processEraserStroke(state.currentStroke);
+            await main_handle_eraser_stroke(state.currentStroke);
         } else {
             const cmd = new DrawCommand({
                 stroke: state.currentStroke,
                 strokeHistoryRef: state.strokeHistory,
-                redrawFn: () => redrawAllStrokes()
+                redrawFn: () => main_render_all_strokes()
             });
-            await executeCommand(cmd, false);
+            await history_execute_command(cmd, false);
             
-            if (shouldCompact()) {
-                scheduleCompact();
+            if (history_validate_compact()) {
+                main_init_compact();
             }
         }
     }
     state.currentStroke = null;
     
-    await batchDrawManager.endDrawing();
+    await batchDrawManager.batch_draw_handle_end();
     
-    batchDrawManager.clear();
+    batchDrawManager.batch_draw_delete_all();
 }
 
-async function processEraserStroke(eraserStroke) {
-    const hasIntersection = checkEraserIntersection(eraserStroke);
+async function main_handle_eraser_stroke(eraserStroke) {
+    const hasIntersection = main_validate_eraser_intersection(eraserStroke);
     
     if (hasIntersection) {
         const cmd = new EraseCommand({
             stroke: eraserStroke,
             strokeHistoryRef: state.strokeHistory,
-            redrawFn: () => redrawAllStrokes()
+            redrawFn: () => main_render_all_strokes()
         });
-        await executeCommand(cmd, false);
+        await history_execute_command(cmd, false);
         console.log('橡皮擦擦除了内容，记录撤销步骤');
     } else {
         console.log('橡皮擦未擦除到内容，不记录撤销步骤');
@@ -2812,7 +2487,7 @@ async function processEraserStroke(eraserStroke) {
 /**
  * 检测橡皮擦是否与现有笔画相交
  */
-function checkEraserIntersection(eraserStroke) {
+function main_validate_eraser_intersection(eraserStroke) {
     // 如果有 baseImageObj，橡皮擦一定能擦除到内容
     if (state.baseImageObj) {
         return true;
@@ -2854,7 +2529,7 @@ function checkEraserIntersection(eraserStroke) {
                 const y2 = point.toY || point.y;
                 
                 // 检测点到线段的距离
-                const distance = pointToSegmentDistance(ex, ey, x1, y1, x2, y2);
+                const distance = main_calc_point_segment_distance(ex, ey, x1, y1, x2, y2);
                 
                 // 考虑橡皮擦的半径和笔画的线宽
                 const strokeWidth = (stroke.lineWidth || DRAW_CONFIG.penWidth) / 2;
@@ -2873,7 +2548,7 @@ function checkEraserIntersection(eraserStroke) {
 /**
  * 计算点到线段的最短距离
  */
-function pointToSegmentDistance(px, py, x1, y1, x2, y2) {
+function main_calc_point_segment_distance(px, py, x1, y1, x2, y2) {
     const dx = x2 - x1;
     const dy = y2 - y1;
     
@@ -2893,13 +2568,13 @@ function pointToSegmentDistance(px, py, x1, y1, x2, y2) {
     return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
 }
 
-async function redrawAllStrokes(dirtyRect = null) {
+async function main_render_all_strokes(dirtyRect = null) {
     const ctx = dom.drawCtx;
-    const scale = getSafeScale();
+    const scale = main_fetch_safe_scale();
     
     ctx.imageSmoothingEnabled = false;
     
-    const visibleRect = getVisibleRect();
+    const visibleRect = main_fetch_visible_rect();
     
     // 如果有脏区域，只清除和重绘该区域
     if (dirtyRect) {
@@ -2946,7 +2621,7 @@ async function redrawAllStrokes(dirtyRect = null) {
     }
     
     // 进一步过滤：只保留可见区域内的笔画
-    strokesToRedraw = strokesToRedraw.filter(stroke => isStrokeVisible(stroke, visibleRect));
+    strokesToRedraw = strokesToRedraw.filter(stroke => main_validate_stroke_visible(stroke, visibleRect));
     
     // 检查是否有橡皮擦笔画
     const hasEraseStrokes = strokesToRedraw.some(stroke => stroke.type === 'erase');
@@ -3097,12 +2772,12 @@ async function redrawAllStrokes(dirtyRect = null) {
     }
 }
 
-async function drawEraserStroke(stroke) {
+async function main_render_eraser_stroke(stroke) {
     if (!stroke.points || stroke.points.length < 1) return;
     
     const ctx = dom.drawCtx;
     const strokeScale = stroke.scale || 1;
-    setContextState(dom.drawCtx, {
+    main_update_context_state(dom.drawCtx, {
         globalCompositeOperation: 'destination-out',
         strokeStyle: 'rgba(0, 0, 0, 1)',
         lineWidth: (stroke.eraserSize || DRAW_CONFIG.eraserSize) / strokeScale,
@@ -3131,11 +2806,11 @@ async function drawEraserStroke(stroke) {
     dom.drawCtx.stroke(path);
 }
 
-async function drawStroke(stroke) {
+async function main_render_stroke(stroke) {
     if (!stroke.points || stroke.points.length < 1) return;
     
     const strokeScale = stroke.scale || 1;
-    setContextState(dom.drawCtx, {
+    main_update_context_state(dom.drawCtx, {
         strokeStyle: stroke.color || DRAW_CONFIG.penColor,
         lineWidth: (stroke.lineWidth || DRAW_CONFIG.penWidth) / strokeScale,
         lineCap: 'round',
@@ -3185,7 +2860,7 @@ let currentContextState = {
  * @param {CanvasRenderingContext2D} ctx - 目标上下文
  * @param {Object} state - 新状态
  */
-function setContextState(ctx, state) {
+function main_update_context_state(ctx, state) {
     if (currentContextState.strokeStyle !== state.strokeStyle) {
         ctx.strokeStyle = state.strokeStyle;
         currentContextState.strokeStyle = state.strokeStyle;
@@ -3218,7 +2893,7 @@ function setContextState(ctx, state) {
  * @param {CanvasRenderingContext2D} ctx - 目标上下文
  * @param {Array} strokes - 笔画数组
  */
-async function drawStrokes(ctx, strokes) {
+async function main_render_strokes_to_context(ctx, strokes) {
     if (strokes.length === 0) return;
     
     ctx.lineCap = 'round';
@@ -3260,12 +2935,12 @@ async function drawStrokes(ctx, strokes) {
     ctx.globalCompositeOperation = 'source-over';
 }
 
-function scheduleCompact() {
-    if (!shouldCompact()) return;
+function main_init_compact() {
+    if (!history_validate_compact()) return;
     if (compactIdleId !== null) return;
     
-    const undoStack = getUndoStack();
-    const hasNonCompactible = undoStack.some(cmd => cmd.canCompact && !cmd.canCompact());
+    const undoStack = history_fetch_undo_stack();
+    const hasNonCompactible = undoStack.some(cmd => cmd.can_compact && !cmd.can_compact());
     if (hasNonCompactible) {
         console.log('检测到不可压缩的操作，跳过压缩');
         return;
@@ -3273,27 +2948,27 @@ function scheduleCompact() {
     
     compactIdleId = requestIdleCallback((deadline) => {
         compactIdleId = null;
-        doCompactStrokes();
+        main_handle_compact_strokes();
     }, { timeout: 2000 });
 }
 
-async function doCompactStrokes() {
-    if (!shouldCompact()) return;
+async function main_handle_compact_strokes() {
+    if (!history_validate_compact()) return;
     
-    const undoStack = getUndoStack();
-    const hasNonCompactible = undoStack.some(cmd => cmd.canCompact && !cmd.canCompact());
+    const undoStack = history_fetch_undo_stack();
+    const hasNonCompactible = undoStack.some(cmd => cmd.can_compact && !cmd.can_compact());
     if (hasNonCompactible) {
         console.log('压缩执行前检测到不可压缩的操作，取消压缩');
         return;
     }
     
-    const commandsToCompact = getCommandsToCompact();
+    const commandsToCompact = history_fetch_commands_to_compact();
     if (commandsToCompact.length === 0) return;
     
     const loadId = ++state.baseImageLoadId;
     const compactSnapshotId = ++state.compactSnapshotId || (state.compactSnapshotId = 1);
     
-    const beforeStrokes = cloneStrokesDeep(state.strokeHistory);
+    const beforeStrokes = main_main_stroke_clone_deep(state.strokeHistory);
     const frozenImageURL = state.baseImageURL;
     
     const strokesToCompactSet = new Set();
@@ -3315,7 +2990,7 @@ async function doCompactStrokes() {
                 canvasHeight: DRAW_CONFIG.canvasH
             };
             
-            const result = await invoke('compact_strokes', { request });
+            const result = await invoke('stroke_format_compact', { request });
             
             if (loadId !== state.baseImageLoadId) return;
             
@@ -3337,7 +3012,7 @@ async function doCompactStrokes() {
             state.strokeHistory.length = 0;
             remainingStrokes.forEach(s => state.strokeHistory.push(s));
             
-            const afterStrokes = cloneStrokes(state.strokeHistory);
+            const afterStrokes = main_stroke_clone(state.strokeHistory);
             
             const snapshotCmd = new SnapshotCommand({
                 beforeImageURL: frozenImageURL,
@@ -3347,11 +3022,11 @@ async function doCompactStrokes() {
                 strokeHistoryRef: state.strokeHistory,
                 baseImageURLRef: { get value() { return state.baseImageURL; }, set value(v) { state.baseImageURL = v; } },
                 baseImageObjRef: { get value() { return state.baseImageObj; }, set value(v) { state.baseImageObj = v; } },
-                redrawFn: () => redrawAllStrokes(),
-                loadBaseImageFn: (url) => loadBaseImageFromURL(url)
+                redrawFn: () => main_render_all_strokes(),
+                loadBaseImageFn: (url) => main_load_base_image(url)
             });
             
-            compactHistory(snapshotCmd);
+            history_format_compact(snapshotCmd);
             
             state.baseImageURL = afterImageURL;
             state.baseImageObj = null;
@@ -3363,81 +3038,56 @@ async function doCompactStrokes() {
             };
             img.src = afterImageURL;
             
-            console.log('Rust 笔画已压缩，保留最近', getUndoStack().length, '步可撤销');
+            console.log('Rust 笔画已压缩，保留最近', history_fetch_undo_stack().length, '步可撤销');
             return;
         } catch (error) {
             console.error('Rust 笔画压缩失败，使用前端降级方案:', error);
         }
     }
     
-    const offscreen = getOffscreenCanvas();
+    const offscreen = main_fetch_offscreen_canvas();
     const tempCtx = offscreen.ctx;
     
     if (state.baseImageObj) {
         tempCtx.drawImage(state.baseImageObj, 0, 0, DRAW_CONFIG.canvasW, DRAW_CONFIG.canvasH);
     }
     
-    await drawStrokes(tempCtx, strokesToCompact);
+    await main_render_strokes_to_context(tempCtx, strokesToCompact);
     
     if (loadId !== state.baseImageLoadId) {
-        releaseOffscreenCanvas(offscreen);
+        main_release_offscreen_canvas(offscreen);
         return;
     }
     
     const afterImageURL = offscreen.canvas.toDataURL('image/png');
     
-    const remainingStrokes = state.strokeHistory.filter(s => {
-        if (strokesToCompactSet.has(s)) return false;
-        for (const cs of strokesToCompact) {
-            if (s.points && cs.points && s.points.length === cs.points.length) return false;
-        }
-        return true;
-    });
-    state.strokeHistory.length = 0;
-    remainingStrokes.forEach(s => state.strokeHistory.push(s));
-    
-    const afterStrokes = cloneStrokes(state.strokeHistory);
-    
-    const snapshotCmd = new SnapshotCommand({
-        beforeImageURL: frozenImageURL,
-        afterImageURL,
-        beforeStrokes,
-        afterStrokes,
-        strokeHistoryRef: state.strokeHistory,
-        baseImageURLRef: { get value() { return state.baseImageURL; }, set value(v) { state.baseImageURL = v; } },
-        baseImageObjRef: { get value() { return state.baseImageObj; }, set value(v) { state.baseImageObj = v; } },
-        redrawFn: () => redrawAllStrokes(),
-        loadBaseImageFn: (url) => loadBaseImageFromURL(url)
-    });
-    
-    compactHistory(snapshotCmd);
-    
-    state.baseImageURL = afterImageURL;
-    state.baseImageObj = null;
     const img = new Image();
     img.onload = () => {
         if (loadId === state.baseImageLoadId) {
             state.baseImageObj = img;
         }
-        releaseOffscreenCanvas(offscreen);
+        main_release_offscreen_canvas(offscreen);
     };
     img.onerror = () => {
-        releaseOffscreenCanvas(offscreen);
+        main_release_offscreen_canvas(offscreen);
+    };
+    img.onerror = () => {
+        main_release_offscreen_canvas(offscreen);
     };
     img.src = afterImageURL;
     
-    console.log('笔画已异步压缩，保留最近', getUndoStack().length, '步可撤销');
+    console.log('笔画已异步压缩，保留最近', history_fetch_undo_stack().length, '步可撤销');
 }
 
-function compactStrokes() {
-    scheduleCompact();
+function main_format_compact_strokes() {
+    main_init_compact();
 }
 
-async function saveSnapshot() {
-    await endStroke();
+async function main_save_snapshot() {
+    await main_submit_stroke();
 }
 
-async function undo() {
+async function main_handle_undo() {
     if (compactIdleId !== null) {
         cancelIdleCallback(compactIdleId);
         compactIdleId = null;
@@ -3447,19 +3097,19 @@ async function undo() {
     state.baseImageLoadId++;
     state.compactSnapshotId = (state.compactSnapshotId || 0) + 1;
     
-    await historyUndo();
+    await history_handle_undo();
     console.log('撤销操作');
 }
 
-function updateHistoryBtnStatus() {
-    dom.btnUndo.disabled = !canUndo();
+function main_update_history_button_status() {
+    dom.btnUndo.disabled = !history_validate_undo();
 }
 
 // 清空画布
-function clearDrawCanvas() {
+function main_delete_draw_canvas() {
     dom.drawCtx.clearRect(0, 0, DRAW_CONFIG.canvasW, DRAW_CONFIG.canvasH);
-    const scale = getSafeScale();
-    setContextState(dom.drawCtx, {
+    const scale = main_fetch_safe_scale();
+    main_update_context_state(dom.drawCtx, {
         strokeStyle: DRAW_CONFIG.penColor,
         lineWidth: DRAW_CONFIG.penWidth / scale,
         lineCap: 'round',
@@ -3468,78 +3118,78 @@ function clearDrawCanvas() {
     });
 }
 
-async function clearAllDrawings() {
+async function main_delete_all_drawings() {
     if (state.strokeHistory.length === 0 && !state.baseImageObj) return;
     
     const cmd = new ClearCommand({
-        savedStrokeHistory: cloneStrokesDeep(state.strokeHistory),
+        savedStrokeHistory: main_main_stroke_clone_deep(state.strokeHistory),
         savedBaseImageURL: state.baseImageURL,
         strokeHistoryRef: state.strokeHistory,
         baseImageURLRef: { get value() { return state.baseImageURL; }, set value(v) { state.baseImageURL = v; } },
         baseImageObjRef: { get value() { return state.baseImageObj; }, set value(v) { state.baseImageObj = v; } },
-        redrawFn: () => redrawAllStrokes(),
-        loadBaseImageFn: (url) => loadBaseImageFromURL(url)
+        redrawFn: () => main_render_all_strokes(),
+        loadBaseImageFn: (url) => main_load_base_image(url)
     });
-    await executeCommand(cmd);
+    await history_execute_command(cmd);
     
-    clearDrawCanvas();
+    main_delete_draw_canvas();
     
     if (currentSourceId) {
-        saveCurrentSourceData();
+        main_save_current_source_data();
     }
     
     if (state.drawMode === 'eraser') {
-        switchMode('comment');
+        main_update_mode('comment');
     }
     
     console.log('清空所有批注');
 }
 
-function loadBaseImageFromURL(url) {
+function main_load_base_image(url) {
     const loadId = ++state.baseImageLoadId;
     const img = new Image();
     img.onload = () => {
         if (loadId === state.baseImageLoadId) {
             state.baseImageObj = img;
-            redrawAllStrokes();
+            main_render_all_strokes();
         }
     };
     img.src = url;
 }
 
 // 拍照功能
-function takePhoto() {
+function main_save_photo() {
     if (state.isCameraOpen) {
-        captureCamera();
+        main_save_camera_image();
     } else if (state.currentImageIndex >= 0 && state.imageList.length > 0) {
         (async () => {
             try {
                 // 保存当前数据并重置状态
-                saveCurrentSourceData();
+                main_save_current_source_data();
                 
                 state.currentImageIndex = -1;
                 state.currentImage = null;
                 currentSourceId = null;
-                clearImageLayer();
-                clearDrawCanvas();
+                main_delete_image_layer();
+                main_delete_draw_canvas();
                 
-                await switchToSource('cam');
+                await main_update_source('cam');
                 
                 if (!state.isCameraOpen) {
-                    await setCameraState(true);
+                    await main_update_camera_state(true);
                 }
                 
-                updateSidebarSelection();
-                updatePhotoButtonState();
+                main_update_sidebar_selection();
+                main_update_photo_button_state();
                 console.log('返回摄像头');
             } catch (error) {
                 console.error('返回摄像头失败:', error);
                 if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-                    showNoCameraMessage(window.i18n?.t('camera.notDetected') || '未检测到摄像头');
+                    main_show_no_camera_message(window.i18n?.format_translate('camera.notDetected') || '未检测到摄像头');
                 } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    showNoCameraMessage(window.i18n?.t('camera.noPermission') || '无摄像头权限');
+                    main_show_no_camera_message(window.i18n?.format_translate('camera.noPermission') || '无摄像头权限');
                 } else {
-                    showNoCameraMessage(window.i18n?.t('camera.initFailed') || '摄像头初始化失败');
+                    main_show_no_camera_message(window.i18n?.format_translate('camera.initFailed') || '摄像头初始化失败');
                 }
             }
         })();
@@ -3547,36 +3197,36 @@ function takePhoto() {
         (async () => {
             try {
                 // 保存当前数据并重置状态
-                saveCurrentSourceData();
+                main_save_current_source_data();
                 
                 state.currentFolderIndex = -1;
                 state.currentFolderPageIndex = -1;
                 state.currentImage = null;
                 currentSourceId = null;
-                clearImageLayer();
-                clearDrawCanvas();
+                main_delete_image_layer();
+                main_delete_draw_canvas();
                 
-                await switchToSource('cam');
+                await main_update_source('cam');
                 
                 if (!state.isCameraOpen) {
-                    await setCameraState(true);
+                    await main_update_camera_state(true);
                 }
                 
-                updateFolderPageSelection(-1, -1);
-                updatePhotoButtonState();
+                main_update_folder_page_selection(-1, -1);
+                main_update_photo_button_state();
                 console.log('返回摄像头');
             } catch (error) {
                 console.error('返回摄像头失败:', error);
             }
         })();
     } else {
-        saveMergedCanvas();
+        main_save_merged_canvas();
     }
 }
 
-function saveMergedCanvas() {
+function main_save_merged_canvas() {
     console.log('执行拍照功能');
-    const offscreen = getOffscreenCanvas();
+    const offscreen = main_fetch_offscreen_canvas();
     const mergedCtx = offscreen.ctx;
     
     // 填充背景色
@@ -3599,12 +3249,12 @@ function saveMergedCanvas() {
     link.href = offscreen.canvas.toDataURL('image/png');
     link.click();
     
-    releaseOffscreenCanvas(offscreen);
+    main_release_offscreen_canvas(offscreen);
 }
 
 let lastPhotoButtonState = null;
 
-function updatePhotoButtonState() {
+function main_update_photo_button_state() {
     const btnPhoto = dom.btnPhoto;
     const btnDocScan = dom.btnDocScan;
     
@@ -3622,23 +3272,23 @@ function updatePhotoButtonState() {
     let newState;
     let html, title;
     
-    const photoText = window.i18n?.t('toolbar.photo') || '拍照';
-    const switchToCameraText = window.i18n?.t('camera.switchToCamera') || '切换到摄像头';
-    const showText = ThemeManager.getShowToolbarText();
+    const photoText = window.i18n?.format_translate('toolbar.photo') || '拍照';
+    const switchToCameraText = window.i18n?.format_translate('camera.switchToCamera') || '切换到摄像头';
+    const showText = ThemeManager.theme_fetch_toolbar_text();
     
     if (state.isCameraOpen) {
         newState = 'camera';
-        html = `${ThemeManager.getIcon('camera', { alt: photoText })}${showText ? photoText : ''}`;
-        title = window.i18n?.t('camera.captureFrame') || '捕获摄像头画面';
+        html = `${ThemeManager.theme_fetch_icon('camera', { alt: photoText })}${showText ? photoText : ''}`;
+        title = window.i18n?.format_translate('camera.captureFrame') || '捕获摄像头画面';
     } else if ((state.currentImageIndex >= 0 && state.imageList.length > 0) || 
                (state.currentFolderIndex >= 0 && state.currentFolderPageIndex >= 0)) {
         newState = 'switch';
-        html = `${ThemeManager.getIcon('camera-fill', { alt: switchToCameraText })}${showText ? switchToCameraText : ''}`;
-        title = window.i18n?.t('camera.switchToCamera') || '返回摄像头';
+        html = `${ThemeManager.theme_fetch_icon('camera-fill', { alt: switchToCameraText })}${showText ? switchToCameraText : ''}`;
+        title = window.i18n?.format_translate('camera.switchToCamera') || '返回摄像头';
     } else {
         newState = 'save';
-        html = `${ThemeManager.getIcon('camera', { alt: photoText })}${showText ? photoText : ''}`;
-        title = window.i18n?.t('camera.saveScreenshot') || '保存画布截图';
+        html = `${ThemeManager.theme_fetch_icon('camera', { alt: photoText })}${showText ? photoText : ''}`;
+        title = window.i18n?.format_translate('camera.saveScreenshot') || '保存画布截图';
     }
     
     if (lastPhotoButtonState === newState) return;
@@ -3649,17 +3299,17 @@ function updatePhotoButtonState() {
 }
 
 // 设置功能
-function openSettings() {
+function main_show_settings() {
     const existingPanel = dom.settingsPanel.classList.contains('visible');
     if (existingPanel) {
-        hideSettingsPanel();
+        main_hide_settings_panel();
     } else {
-        showSettingsPanel();
+        main_show_settings_panel();
     }
 }
 
-function showSettingsPanel() {
-    hidePenControlPanel();
+function main_show_settings_panel() {
+    main_hide_pen_control_panel();
     
     const panel = dom.settingsPanel;
     const btnRect = dom.btnSettings.getBoundingClientRect();
@@ -3685,27 +3335,27 @@ function showSettingsPanel() {
     panel.classList.add('visible');
 }
 
-function hideSettingsPanel() {
+function main_hide_settings_panel() {
     dom.settingsPanel.classList.remove('visible');
 }
 
-function openSettingsWindow() {
+function main_show_settings_window() {
     if (window.__TAURI__) {
         const { invoke } = window.__TAURI__.core;
-        invoke('open_settings_window').catch(error => {
+        invoke('window_show_settings').catch(error => {
             console.error('打开设置窗口失败:', error);
         });
     }
 }
 
-async function rotateImage(direction) {
+async function main_update_image_rotation(direction) {
     if (state.isCameraOpen) {
         if (direction === 'left') {
             state.cameraRotation = (state.cameraRotation - 90 + 360) % 360;
         } else {
             state.cameraRotation = (state.cameraRotation + 90) % 360;
         }
-        updateCameraVideoStyle();
+        main_update_camera_video_style();
         console.log(`摄像头画面已旋转到 ${state.cameraRotation}°`);
         return;
     }
@@ -3720,17 +3370,17 @@ async function rotateImage(direction) {
     if (window.__TAURI__) {
         try {
             const { invoke } = window.__TAURI__.core;
-            rotatedDataUrl = await invoke('rotate_image', { 
+            rotatedDataUrl = await invoke('image_update_rotation', { 
                 imageData: state.currentImage.src, 
                 direction: direction 
             });
             console.log('Rust 图片旋转完成');
         } catch (error) {
             console.error('Rust 图片旋转失败，使用前端降级方案:', error);
-            rotatedDataUrl = rotateImageFallback(state.currentImage, direction);
+            rotatedDataUrl = main_update_image_rotation_fallback(state.currentImage, direction);
         }
     } else {
-        rotatedDataUrl = rotateImageFallback(state.currentImage, direction);
+        rotatedDataUrl = main_update_image_rotation_fallback(state.currentImage, direction);
     }
     
     const rotatedImg = new Image();
@@ -3743,16 +3393,16 @@ async function rotateImage(direction) {
             state.imageList[state.currentImageIndex].width = rotatedImg.width;
             state.imageList[state.currentImageIndex].height = rotatedImg.height;
             
-            updateSidebarContent();
+            main_update_sidebar_content();
         }
         
-        drawImageToCenter(rotatedImg);
+        main_render_image_centered(rotatedImg);
         console.log(`图片已向${direction === 'left' ? '左' : '右'}旋转`);
     };
     rotatedImg.src = rotatedDataUrl;
 }
 
-function rotateImageFallback(img, direction) {
+function main_update_image_rotation_fallback(img, direction) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     
@@ -3773,30 +3423,30 @@ function rotateImageFallback(img, direction) {
     return canvas.toDataURL('image/png');
 }
 
-function toggleSidebar() {
+function main_handle_sidebar_toggle() {
     const existingSidebar = document.querySelector('.sidebar:not(.file-sidebar)');
     const existingFileSidebar = document.querySelector('.file-sidebar');
     
     if (existingFileSidebar) {
-        collapseFileSidebar();
+        main_hide_file_sidebar();
     }
     
     if (existingSidebar) {
-        collapseSidebar();
+        main_hide_sidebar();
     } else {
-        expandSidebar();
+        main_show_sidebar();
     }
 }
 
-function expandSidebar() {
+function main_show_sidebar() {
     const sidebarElement = document.createElement('div');
     sidebarElement.classList.add('sidebar');
     
-    const noImagesText = window.i18n?.t('common.noImages') || '暂无图片';
-    const imageListText = window.i18n?.t('sidebar.imageList') || '图片列表';
-    const importImageText = window.i18n?.t('sidebar.importImage') || '导入图片';
-    const deleteText = window.i18n?.t('common.delete') || '删除';
-    const collapseText = window.i18n?.t('common.collapse') || '收起';
+    const noImagesText = window.i18n?.format_translate('common.noImages') || '暂无图片';
+    const imageListText = window.i18n?.format_translate('sidebar.imageList') || '图片列表';
+    const importImageText = window.i18n?.format_translate('sidebar.importImage') || '导入图片';
+    const deleteText = window.i18n?.format_translate('common.delete') || '删除';
+    const collapseText = window.i18n?.format_translate('common.collapse') || '收起';
     
     let imageListHTML = '';
     if (state.imageList.length === 0) {
@@ -3804,7 +3454,7 @@ function expandSidebar() {
     } else {
         state.imageList.forEach((imgData, index) => {
             const isActive = (state.currentImageIndex >= 0 && index === state.currentImageIndex) ? 'active' : '';
-            const imageAlt = window.i18n?.t('sidebar.imageAlt', { n: index + 1 }) || `图片${index + 1}`;
+            const imageAlt = window.i18n?.format_translate('sidebar.imageAlt', { n: index + 1 }) || `图片${index + 1}`;
             imageListHTML += `
                 <div class="sidebar-image-item ${isActive}" data-index="${index}">
                     <img src="${imgData.thumbnail}" class="sidebar-thumbnail" alt="${imageAlt}">
@@ -3822,59 +3472,59 @@ function expandSidebar() {
             ${imageListHTML}
         </div>
         <button class="sidebar-import-btn" id="btnImportImageSidebar">
-            ${ThemeManager.getIcon('image', { alt: importImageText })}
+            ${ThemeManager.theme_fetch_icon('image', { alt: importImageText })}
             ${importImageText}
         </button>
     `;
     dom.canvasContainer.appendChild(sidebarElement);
     
-    document.getElementById('btnImportImageSidebar')?.addEventListener('click', importImage);
+    document.getElementById('btnImportImageSidebar')?.addEventListener('click', main_load_image);
     
     document.querySelectorAll('.sidebar-image-item').forEach(item => {
         const index = parseInt(item.dataset.index);
         
         item.querySelector('.sidebar-btn-delete')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            deleteImage(index);
+            main_delete_image(index);
         });
         
-        item.addEventListener('click', () => selectImage(index));
+        item.addEventListener('click', () => main_update_image_selection(index));
     });
     
-    const showText = ThemeManager.getShowToolbarText();
+    const showText = ThemeManager.theme_fetch_toolbar_text();
     dom.btnExpand.innerHTML = `
-        ${ThemeManager.getIcon('collapse', { alt: collapseText })}
+        ${ThemeManager.theme_fetch_icon('collapse', { alt: collapseText })}
         ${showText ? collapseText : ''}
     `;
     console.log('展开侧边栏');
 }
 
-async function selectImage(index) {
+async function main_update_image_selection(index) {
     if (index < 0 || index >= state.imageList.length) return;
     
     if (index === state.currentImageIndex && state.currentImage) {
         (async () => {
             try {
-                saveCurrentSourceData();
+                main_save_current_source_data();
                 
                 state.currentImageIndex = -1;
                 state.currentImage = null;
                 currentSourceId = null;
-                clearImageLayer();
-                clearDrawCanvas();
+                main_delete_image_layer();
+                main_delete_draw_canvas();
                 
                 if (state.isCameraOpen) {
-                    await setCameraState(false);
+                    await main_update_camera_state(false);
                 }
                 
-                await switchToSource('cam');
+                await main_update_source('cam');
                 
                 if (!state.isCameraOpen) {
-                    await setCameraState(true);
+                    await main_update_camera_state(true);
                 }
                 
-                updateSidebarSelection();
-                updatePhotoButtonState();
+                main_update_sidebar_selection();
+                main_update_photo_button_state();
                 console.log('返回摄像头');
             } catch (error) {
                 console.error('返回摄像头失败:', error);
@@ -3892,23 +3542,23 @@ async function selectImage(index) {
     const imgData = state.imageList[index];
     
     if (!imgData.sourceId) {
-        imgData.sourceId = generateSourceId('pic');
+        imgData.sourceId = main_create_source_id('pic');
     }
     
-    await switchToSource(imgData.sourceId);
+    await main_update_source(imgData.sourceId);
     
     const img = new Image();
     img.onload = async () => {
         state.currentImage = img;
         
         if (state.isCameraOpen) {
-            await setCameraState(false);
+            await main_update_camera_state(false);
         }
-        drawImageToCenter(img);
+        main_render_image_centered(img);
         
-        await redrawAllStrokes();
-        updateSidebarSelection();
-        updatePhotoButtonState();
+        await main_render_all_strokes();
+        main_update_sidebar_selection();
+        main_update_photo_button_state();
     };
     img.onerror = () => {
         console.error(`加载图片 ${index + 1} 失败`);
@@ -3918,27 +3568,27 @@ async function selectImage(index) {
     console.log(`切换到图片 ${index + 1}`);
 }
 
-function saveCurrentDrawData() {
+function main_save_draw_data() {
     if (state.currentImageIndex >= 0 && state.currentImageIndex < state.imageList.length) {
         const imgData = state.imageList[state.currentImageIndex];
         
         if (imgData.sourceId) {
-            saveCurrentSourceData();
+            main_save_current_source_data();
         }
     }
 }
 
-async function restoreDrawData(index) {
+async function main_load_draw_data(index) {
     if (index >= 0 && index < state.imageList.length) {
         const imgData = state.imageList[index];
         
         if (imgData.sourceId) {
-            await switchToSource(imgData.sourceId);
+            await main_update_source(imgData.sourceId);
         }
     }
 }
 
-function deleteImage(index) {
+function main_delete_image(index) {
     if (index < 0 || index >= state.imageList.length) return;
     
     const imgData = state.imageList[index];
@@ -3955,26 +3605,26 @@ function deleteImage(index) {
         if (state.imageList.length > 0) {
             const newIndex = Math.min(index, state.imageList.length - 1);
             state.currentImageIndex = -1;
-            selectImage(newIndex);
+            main_update_image_selection(newIndex);
         } else {
             state.currentImageIndex = -1;
             state.currentImage = null;
-            clearImageLayer();
-            clearDrawCanvas();
-            updatePhotoButtonState();
-            openCamera();
+            main_delete_image_layer();
+            main_delete_draw_canvas();
+            main_update_photo_button_state();
+            main_init_camera();
         }
     } else if (state.currentImageIndex > index) {
         state.currentImageIndex--;
     }
     
-    updateSidebarContent();
+    main_update_sidebar_content();
     console.log(`删除图片 ${index + 1}`);
 }
 
 let lastSidebarSelection = -2;
 
-function updateSidebarSelection() {
+function main_update_sidebar_selection() {
     if (lastSidebarSelection === state.currentImageIndex) return;
     
     const sidebarContent = document.querySelector('.sidebar:not(.file-sidebar) .sidebar-content');
@@ -3997,12 +3647,12 @@ function updateSidebarSelection() {
     });
 }
 
-function updateSidebarContent() {
+function main_update_sidebar_content() {
     const sidebarContent = document.querySelector('.sidebar-content');
     if (!sidebarContent) return;
     
-    const noImagesText = window.i18n?.t('common.noImages') || '暂无图片';
-    const deleteText = window.i18n?.t('common.delete') || '删除';
+    const noImagesText = window.i18n?.format_translate('common.noImages') || '暂无图片';
+    const deleteText = window.i18n?.format_translate('common.delete') || '删除';
     
     let imageListHTML = '';
     if (state.imageList.length === 0) {
@@ -4010,7 +3660,7 @@ function updateSidebarContent() {
     } else {
         state.imageList.forEach((imgData, index) => {
             const isActive = (state.currentImageIndex >= 0 && index === state.currentImageIndex) ? 'active' : '';
-            const imageAlt = window.i18n?.t('sidebar.imageAlt', { n: index + 1 }) || `图片${index + 1}`;
+            const imageAlt = window.i18n?.format_translate('sidebar.imageAlt', { n: index + 1 }) || `图片${index + 1}`;
             imageListHTML += `
                 <div class="sidebar-image-item ${isActive}" data-index="${index}">
                     <img src="${imgData.thumbnail}" class="sidebar-thumbnail" alt="${imageAlt}">
@@ -4029,14 +3679,14 @@ function updateSidebarContent() {
         
         item.querySelector('.sidebar-btn-delete')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            deleteImage(index);
+            main_delete_image(index);
         });
         
-        item.addEventListener('click', () => selectImage(index));
+        item.addEventListener('click', () => main_update_image_selection(index));
     });
 }
 
-function collapseSidebar() {
+function main_hide_sidebar() {
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) {
         sidebar.classList.add('collapse');
@@ -4045,42 +3695,42 @@ function collapseSidebar() {
         }, { once: true });
     }
     
-    const imageText = window.i18n?.t('toolbar.image') || '图片';
-    const showText = ThemeManager.getShowToolbarText();
+    const imageText = window.i18n?.format_translate('toolbar.image') || '图片';
+    const showText = ThemeManager.theme_fetch_toolbar_text();
     dom.btnExpand.innerHTML = `
-        ${ThemeManager.getIcon('image', { alt: imageText })}
+        ${ThemeManager.theme_fetch_icon('image', { alt: imageText })}
         ${showText ? imageText : ''}
     `;
     console.log('收起侧边栏');
 }
 
 // 文件侧边栏
-function toggleFileSidebar() {
+function main_handle_file_sidebar_toggle() {
     const existingFileSidebar = document.querySelector('.file-sidebar');
     const existingSidebar = document.querySelector('.sidebar:not(.file-sidebar)');
     
     if (existingSidebar) {
-        collapseSidebar();
+        main_hide_sidebar();
     }
     
     if (existingFileSidebar) {
-        collapseFileSidebar();
+        main_hide_file_sidebar();
     } else {
-        expandFileSidebar();
+        main_show_file_sidebar();
     }
 }
 
-function expandFileSidebar() {
+function main_show_file_sidebar() {
     const existingSidebar = document.querySelector('.file-sidebar');
     if (existingSidebar) {
-        updateFileSidebarContent();
+        main_update_file_sidebar_content();
         return;
     }
     
-    const noFilesText = window.i18n?.t('common.noFiles') || '暂无文件';
-    const fileListText = window.i18n?.t('sidebar.fileList') || '文件列表';
-    const addFileText = window.i18n?.t('sidebar.addFile') || '添加文件';
-    const collapseText = window.i18n?.t('common.collapse') || '收起';
+    const noFilesText = window.i18n?.format_translate('common.noFiles') || '暂无文件';
+    const fileListText = window.i18n?.format_translate('sidebar.fileList') || '文件列表';
+    const addFileText = window.i18n?.format_translate('sidebar.addFile') || '添加文件';
+    const collapseText = window.i18n?.format_translate('common.collapse') || '收起';
     
     const fileSidebarElement = document.createElement('div');
     fileSidebarElement.classList.add('sidebar', 'file-sidebar');
@@ -4092,11 +3742,11 @@ function expandFileSidebar() {
         state.fileList.forEach((folder, index) => {
             const isWord = folder.isWord === true;
             const iconName = isWord ? 'word' : 'pdf';
-            const fileAlt = window.i18n?.t('toolbar.file') || '文件';
-            const pagesText = window.i18n?.t('sidebar.pages', { n: folder.pages.length }) || `${folder.pages.length}页`;
+            const fileAlt = window.i18n?.format_translate('toolbar.file') || '文件';
+            const pagesText = window.i18n?.format_translate('sidebar.pages', { n: folder.pages.length }) || `${folder.pages.length}页`;
             contentHTML += `
                 <div class="sidebar-folder-item" data-index="${index}">
-                    ${ThemeManager.getIcon(iconName, { alt: fileAlt })}
+                    ${ThemeManager.theme_fetch_icon(iconName, { alt: fileAlt })}
                     <span class="folder-name">${folder.name}</span>
                     <span class="folder-count">${pagesText}</span>
                 </div>
@@ -4110,7 +3760,7 @@ function expandFileSidebar() {
             ${contentHTML}
         </div>
         <button class="sidebar-import-btn" id="btnAddFile">
-            ${ThemeManager.getIcon('addFile', { alt: addFileText })}
+            ${ThemeManager.theme_fetch_icon('addFile', { alt: addFileText })}
             ${addFileText}
         </button>
     `;
@@ -4118,29 +3768,29 @@ function expandFileSidebar() {
     dom.canvasContainer.appendChild(fileSidebarElement);
     
     document.getElementById('btnAddFile')?.addEventListener('click', () => {
-        importPDF();
+        main_load_pdf();
     });
     
     document.querySelectorAll('.sidebar-folder-item').forEach(item => {
         item.addEventListener('click', () => {
             const index = parseInt(item.dataset.index);
-            openFolder(index);
+            main_show_folder(index);
         });
     });
     
-    const showText = ThemeManager.getShowToolbarText();
+    const showText = ThemeManager.theme_fetch_toolbar_text();
     dom.btnSave.innerHTML = `
-        ${ThemeManager.getIcon('collapse', { alt: collapseText })}
+        ${ThemeManager.theme_fetch_icon('collapse', { alt: collapseText })}
         ${showText ? collapseText : ''}
     `;
     console.log('展开文件侧边栏');
     
     if (state.currentFolderIndex >= 0 && state.currentFolderPageIndex >= 0) {
-        openFolder(state.currentFolderIndex);
+        main_show_folder(state.currentFolderIndex);
     }
 }
 
-function openFolder(folderIndex) {
+function main_show_folder(folderIndex) {
     if (folderIndex < 0 || folderIndex >= state.fileList.length) return;
     
     const folder = state.fileList[folderIndex];
@@ -4159,7 +3809,7 @@ function openFolder(folderIndex) {
     let pagesHTML = '';
     folder.pages.forEach((page, index) => {
         const isActive = (state.currentFolderIndex === folderIndex && state.currentFolderPageIndex === index) ? 'active' : '';
-        const pageLabel = window.i18n?.t('sidebar.page', { n: index + 1 }) || `第${index + 1}页`;
+        const pageLabel = window.i18n?.format_translate('sidebar.page', { n: index + 1 }) || `第${index + 1}页`;
         pagesHTML += `
             <div class="sidebar-image-item ${isActive}" data-folder="${folderIndex}" data-page="${index}">
                 <img src="${page.thumbnail}" class="sidebar-thumbnail" alt="${pageLabel}">
@@ -4171,33 +3821,33 @@ function openFolder(folderIndex) {
     sidebarContent.innerHTML = pagesHTML;
     
     document.getElementById('btnBackFolder')?.addEventListener('click', () => {
-        closeFolder();
+        main_hide_folder();
     });
     
     document.querySelectorAll('.file-sidebar .sidebar-image-item').forEach(item => {
         item.addEventListener('click', () => {
             const folderIdx = parseInt(item.dataset.folder);
             const pageIdx = parseInt(item.dataset.page);
-            selectFolderPage(folderIdx, pageIdx);
+            main_show_folder_page(folderIdx, pageIdx);
         });
     });
     
     console.log(`打开文件夹: ${folder.name}`);
 }
 
-function closeFolder() {
-    const fileListText = window.i18n?.t('sidebar.fileList') || '文件列表';
+function main_hide_folder() {
+    const fileListText = window.i18n?.format_translate('sidebar.fileList') || '文件列表';
     const sidebarHeader = document.querySelector('.file-sidebar .sidebar-header');
     if (sidebarHeader) {
         sidebarHeader.innerHTML = `<span class="sidebar-header-text">${fileListText}</span>`;
         sidebarHeader.classList.remove('has-back');
     }
     
-    updateFileSidebarContent();
+    main_update_file_sidebar_content();
     console.log('关闭文件夹');
 }
 
-function selectFolderPage(folderIndex, pageIndex) {
+function main_show_folder_page(folderIndex, pageIndex) {
     if (folderIndex < 0 || folderIndex >= state.fileList.length) return;
     
     const folder = state.fileList[folderIndex];
@@ -4206,17 +3856,17 @@ function selectFolderPage(folderIndex, pageIndex) {
     (async () => {
         try {
             if (state.isCameraOpen) {
-                await setCameraState(false);
+                await main_update_camera_state(false);
             }
             
             const page = folder.pages[pageIndex];
             
             // 使用源ID管理系统切换（内部会自动保存当前数据并加载新数据）
             if (!page.sourceId) {
-                page.sourceId = generateSourceId('doc', pageIndex);
+                page.sourceId = main_create_source_id('doc', pageIndex);
             }
             
-            await switchToSource(page.sourceId);
+            await main_update_source(page.sourceId);
             
             const img = new Image();
             img.onload = async () => {
@@ -4224,12 +3874,12 @@ function selectFolderPage(folderIndex, pageIndex) {
                 state.currentImageIndex = -1;
                 state.currentFolderIndex = folderIndex;
                 state.currentFolderPageIndex = pageIndex;
-                drawImageToCenter(img);
+                main_render_image_centered(img);
                 
-                await redrawAllStrokes();
+                await main_render_all_strokes();
                 
-                updateFolderPageSelection(folderIndex, pageIndex);
-                updatePhotoButtonState();
+                main_update_folder_page_selection(folderIndex, pageIndex);
+                main_update_photo_button_state();
             };
             img.src = page.full;
             
@@ -4240,7 +3890,7 @@ function selectFolderPage(folderIndex, pageIndex) {
     })();
 }
 
-function updateFolderPageSelection(folderIndex, pageIndex) {
+function main_update_folder_page_selection(folderIndex, pageIndex) {
     document.querySelectorAll('.file-sidebar .sidebar-image-item').forEach((item, idx) => {
         const itemFolder = parseInt(item.dataset.folder);
         const itemPage = parseInt(item.dataset.page);
@@ -4257,7 +3907,7 @@ function updateFolderPageSelection(folderIndex, pageIndex) {
     state.currentImageIndex = -1;
 }
 
-function saveCurrentFolderPageDrawData() {
+function main_save_folder_page_draw_data() {
     if (state.currentFolderIndex >= 0 && state.currentFolderPageIndex >= 0) {
         if (state.currentFolderIndex < state.fileList.length) {
             const folder = state.fileList[state.currentFolderIndex];
@@ -4265,31 +3915,31 @@ function saveCurrentFolderPageDrawData() {
                 const page = folder.pages[state.currentFolderPageIndex];
                 
                 if (page.sourceId) {
-                    saveCurrentSourceData();
+                    main_save_current_source_data();
                 }
             }
         }
     }
 }
 
-async function restoreFolderPageDrawData(folderIndex, pageIndex) {
+async function main_load_folder_page_draw_data(folderIndex, pageIndex) {
     if (folderIndex >= 0 && folderIndex < state.fileList.length) {
         const folder = state.fileList[folderIndex];
         if (pageIndex >= 0 && pageIndex < folder.pages.length) {
             const page = folder.pages[pageIndex];
             
             if (page.sourceId) {
-                await switchToSource(page.sourceId);
+                await main_update_source(page.sourceId);
             }
         }
     }
 }
 
-function updateFileSidebarContent() {
+function main_update_file_sidebar_content() {
     const sidebarContent = document.querySelector('.file-sidebar .sidebar-content');
     if (!sidebarContent) return;
     
-    const noFilesText = window.i18n?.t('common.noFiles') || '暂无文件';
+    const noFilesText = window.i18n?.format_translate('common.noFiles') || '暂无文件';
     
     let contentHTML = '';
     if (state.fileList.length === 0) {
@@ -4299,11 +3949,11 @@ function updateFileSidebarContent() {
             const isWord = folder.isWord === true;
             const iconName = isWord ? 'word' : 'pdf';
             console.log(`文件夹 ${folder.name}: isWord=${isWord}, iconName=${iconName}`);
-            const fileAlt = window.i18n?.t('toolbar.file') || '文件';
-            const pagesText = window.i18n?.t('sidebar.pages', { n: folder.pages.length }) || `${folder.pages.length}页`;
+            const fileAlt = window.i18n?.format_translate('toolbar.file') || '文件';
+            const pagesText = window.i18n?.format_translate('sidebar.pages', { n: folder.pages.length }) || `${folder.pages.length}页`;
             contentHTML += `
                 <div class="sidebar-folder-item" data-index="${index}">
-                    ${ThemeManager.getIcon(iconName, { alt: fileAlt })}
+                    ${ThemeManager.theme_fetch_icon(iconName, { alt: fileAlt })}
                     <span class="folder-name">${folder.name}</span>
                     <span class="folder-count">${pagesText}</span>
                 </div>
@@ -4316,12 +3966,12 @@ function updateFileSidebarContent() {
     document.querySelectorAll('.sidebar-folder-item').forEach(item => {
         item.addEventListener('click', () => {
             const index = parseInt(item.dataset.index);
-            openFolder(index);
+            main_show_folder(index);
         });
     });
 }
 
-function importPDF() {
+function main_load_pdf() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.pdf,.docx,.doc';
@@ -4332,95 +3982,95 @@ function importPDF() {
         
         // 保存当前批注数据
         if (currentSourceId) {
-            saveCurrentSourceData();
+            main_save_current_source_data();
         }
         
         const wasCameraOpen = state.isCameraOpen;
         
         if (state.isCameraOpen) {
-            await setCameraState(false);
+            await main_update_camera_state(false);
         }
         
         const fileName = file.name.toLowerCase();
         const isWord = fileName.endsWith('.docx') || fileName.endsWith('.doc');
         
         if (isWord) {
-            showLoadingOverlay(window.i18n?.t('loading.detectingOffice') || '正在检测 Office 软件...');
+            main_show_loading_overlay(window.i18n?.format_translate('loading.detectingOffice') || '正在检测 Office 软件...');
             
             const { invoke } = window.__TAURI__.core;
             
             let detection;
             try {
-                detection = await invoke('detect_office');
+                detection = await invoke('office_detect_all');
                 console.log('Office 检测结果:', detection);
                 if (detection.recommended === 'None') {
-                    hideLoadingOverlay();
-                    showErrorDialog(
-                        window.i18n?.t('errors.officeNotInstalled') || 'Office 未安装',
-                        window.i18n?.t('errors.officeNotInstalledDesc') || '未检测到可用的 Office 软件\n\n请安装以下软件之一：\n• Microsoft Word\n• WPS Office\n• LibreOffice\n\n或将 Word 文档另存为 PDF 后导入'
+                    main_hide_loading_overlay();
+                    main_show_error_dialog(
+                        window.i18n?.format_translate('errors.officeNotInstalled') || 'Office 未安装',
+                        window.i18n?.format_translate('errors.officeNotInstalledDesc') || '未检测到可用的 Office 软件\n\n请安装以下软件之一：\n• Microsoft Word\n• WPS Office\n• LibreOffice\n\n或将 Word 文档另存为 PDF 后导入'
                     );
-                    if (wasCameraOpen) await setCameraState(true);
+                    if (wasCameraOpen) await main_update_camera_state(true);
                     return;
                 }
             } catch (e) {
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.log('检测 Office 失败:', e);
-                showErrorDialog(
-                    window.i18n?.t('errors.officeDetectFailed') || '检测失败',
-                    window.i18n?.t('errors.officeDetectFailedDesc') || '检测 Office 软件失败，请重试'
+                main_show_error_dialog(
+                    window.i18n?.format_translate('errors.officeDetectFailed') || '检测失败',
+                    window.i18n?.format_translate('errors.officeDetectFailedDesc') || '检测 Office 软件失败，请重试'
                 );
-                if (wasCameraOpen) await setCameraState(true);
+                if (wasCameraOpen) await main_update_camera_state(true);
                 return;
             }
             
-            updateLoadingProgress(window.i18n?.t('loading.readingFile') || '正在读取文件...');
+            main_update_loading_progress(window.i18n?.format_translate('loading.readingFile') || '正在读取文件...');
             
             const arrayBuffer = await file.arrayBuffer();
             const uint8Array = new Uint8Array(arrayBuffer);
             
             console.log('文件大小:', uint8Array.length, '字节');
             
-            updateLoadingProgress(window.i18n?.t('loading.processingWord') || '正在处理 Word 文档...');
+            main_update_loading_progress(window.i18n?.format_translate('loading.processingWord') || '正在处理 Word 文档...');
             
             let pdfPath = null;
             try {
-                pdfPath = await invoke('convert_docx_to_pdf_from_bytes', { 
+                pdfPath = await invoke('office_convert_docx_to_pdf_bytes', { 
                     fileData: Array.from(uint8Array),
                     fileName: file.name
                 });
                 console.log('Word 文档已转换为 PDF:', pdfPath);
             } catch (convertError) {
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.error('Word 转换失败:', convertError);
                 const errorMsg = String(convertError);
-                let friendlyMsg = window.i18n?.t('errors.wordConvertFailed') || 'Word 文档转换失败';
+                let friendlyMsg = window.i18n?.format_translate('errors.wordConvertFailed') || 'Word 文档转换失败';
                 
                 if (errorMsg.includes('Office') || errorMsg.includes('Word') || errorMsg.includes('WPS')) {
-                    friendlyMsg = window.i18n?.t('errors.officeCallFailed') || 'Office 软件调用失败\n\n可能的原因：\n• Office 软件未正确安装\n• 文件被其他程序占用\n• 文件格式不支持';
+                    friendlyMsg = window.i18n?.format_translate('errors.officeCallFailed') || 'Office 软件调用失败\n\n可能的原因：\n• Office 软件未正确安装\n• 文件被其他程序占用\n• 文件格式不支持';
                 }
                 
-                showErrorDialog(
-                    window.i18n?.t('errors.convertFailed') || '转换失败',
+                main_show_error_dialog(
+                    window.i18n?.format_translate('errors.convertFailed') || '转换失败',
                     friendlyMsg,
                     () => {
-                        importPDF();
+                        main_load_pdf();
                     }
                 );
-                if (wasCameraOpen) await setCameraState(true);
+                if (wasCameraOpen) await main_update_camera_state(true);
                 return;
             }
             
-            updateLoadingProgress(window.i18n?.t('loading.renderingPage') || '正在渲染页面...');
+            main_update_loading_progress(window.i18n?.format_translate('loading.renderingPage') || '正在渲染页面...');
             
             try {
-                const pdfReady = await waitForPdfJs();
+                const pdfReady = await main_wait_pdfjs();
                 if (!pdfReady) {
-                    hideLoadingOverlay();
-                    showErrorDialog(
-                        window.i18n?.t('errors.loadFailed') || '加载失败',
-                        window.i18n?.t('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
+                    main_hide_loading_overlay();
+                    main_show_error_dialog(
+                        window.i18n?.format_translate('errors.loadFailed') || '加载失败',
+                        window.i18n?.format_translate('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
                     );
-                    if (wasCameraOpen) await setCameraState(true);
+                    if (wasCameraOpen) await main_update_camera_state(true);
                     return;
                 }
                 
@@ -4439,14 +4089,14 @@ function importPDF() {
                 sourceIdCounters.doc++;  // 增加文档计数器
                 const docNumber = sourceIdCounters.doc;
                 
-                folder.pages = await processPdfPagesParallel(pdf, totalPages, 4, docNumber);
+                folder.pages = await main_render_pdf_pages_parallel(pdf, totalPages, 4, docNumber);
                 
                 state.fileList.push(folder);
-                updateFileSidebarContent();
+                main_update_file_sidebar_content();
                 
                 const existingFileSidebar = document.querySelector('.file-sidebar');
                 if (!existingFileSidebar) {
-                    expandFileSidebar();
+                    main_show_file_sidebar();
                 }
                 
                 if (folder.pages.length > 0) {
@@ -4459,16 +4109,16 @@ function importPDF() {
                         
                         // 切换到新源ID
                         if (firstPage.sourceId) {
-                            await switchToSource(firstPage.sourceId);
+                            await main_update_source(firstPage.sourceId);
                         }
                         
-                        drawImageToCenter(img);
-                        updatePhotoButtonState();
+                        main_render_image_centered(img);
+                        main_update_photo_button_state();
                     };
                     img.src = firstPage.full;
                 }
                 
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.log(`文件已导入: ${folder.name}，共${folder.pages.length}页`);
                 
                 try {
@@ -4477,26 +4127,26 @@ function importPDF() {
                     console.log('清理转换的 PDF 失败:', e);
                 }
             } catch (error) {
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.error('文件导入失败:', error);
-                showErrorDialog(
-                    window.i18n?.t('errors.importFailed') || '导入失败',
-                    window.i18n?.t('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
+                main_show_error_dialog(
+                    window.i18n?.format_translate('errors.importFailed') || '导入失败',
+                    window.i18n?.format_translate('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
                 );
-                if (wasCameraOpen) await setCameraState(true);
+                if (wasCameraOpen) await main_update_camera_state(true);
             }
         } else {
-            showLoadingOverlay(window.i18n?.t('loading.importingFile') || '正在导入文件...');
+            main_show_loading_overlay(window.i18n?.format_translate('loading.importingFile') || '正在导入文件...');
             
             try {
-                const pdfReady = await waitForPdfJs();
+                const pdfReady = await main_wait_pdfjs();
                 if (!pdfReady) {
-                    hideLoadingOverlay();
-                    showErrorDialog(
-                        window.i18n?.t('errors.loadFailed') || '加载失败',
-                        window.i18n?.t('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
+                    main_hide_loading_overlay();
+                    main_show_error_dialog(
+                        window.i18n?.format_translate('errors.loadFailed') || '加载失败',
+                        window.i18n?.format_translate('errors.pdfLoadTimeout') || 'PDF 库加载超时\n\n请重启应用后重试'
                     );
-                    if (wasCameraOpen) await setCameraState(true);
+                    if (wasCameraOpen) await main_update_camera_state(true);
                     return;
                 }
                 
@@ -4512,14 +4162,14 @@ function importPDF() {
                 sourceIdCounters.doc++;  // 增加文档计数器
                 const docNumber = sourceIdCounters.doc;
                 
-                folder.pages = await processPdfPagesParallel(pdf, totalPages, 4, docNumber);
+                folder.pages = await main_render_pdf_pages_parallel(pdf, totalPages, 4, docNumber);
                 
                 state.fileList.push(folder);
-                updateFileSidebarContent();
+                main_update_file_sidebar_content();
                 
                 const existingFileSidebar = document.querySelector('.file-sidebar');
                 if (!existingFileSidebar) {
-                    expandFileSidebar();
+                    main_show_file_sidebar();
                 }
                 
                 if (folder.pages.length > 0) {
@@ -4532,25 +4182,25 @@ function importPDF() {
                         
                         // 切换到新源ID
                         if (firstPage.sourceId) {
-                            await switchToSource(firstPage.sourceId);
+                            await main_update_source(firstPage.sourceId);
                         }
                         
-                        drawImageToCenter(img);
-                        updatePhotoButtonState();
+                        main_render_image_centered(img);
+                        main_update_photo_button_state();
                     };
                     img.src = firstPage.full;
                 }
                 
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.log(`文件已导入: ${folder.name}，共${folder.pages.length}页`);
             } catch (error) {
-                hideLoadingOverlay();
+                main_hide_loading_overlay();
                 console.error('文件导入失败:', error);
-                showErrorDialog(
-                    window.i18n?.t('errors.importFailed') || '导入失败',
-                    window.i18n?.t('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
+                main_show_error_dialog(
+                    window.i18n?.format_translate('errors.importFailed') || '导入失败',
+                    window.i18n?.format_translate('errors.importFailedDesc') || '文件导入失败，请确保文件格式正确'
                 );
-                if (wasCameraOpen) await setCameraState(true);
+                if (wasCameraOpen) await main_update_camera_state(true);
             }
         }
     };
@@ -4558,7 +4208,7 @@ function importPDF() {
     input.click();
 }
 
-function showLoadingOverlay(message) {
+function main_show_loading_overlay(message) {
     const overlay = document.createElement('div');
     overlay.id = 'loadingOverlay';
     overlay.className = 'loading-overlay';
@@ -4571,26 +4221,26 @@ function showLoadingOverlay(message) {
     document.body.appendChild(overlay);
 }
 
-function updateLoadingProgress(message) {
+function main_update_loading_progress(message) {
     const loadingMessage = document.getElementById('loadingMessage');
     if (loadingMessage) {
         loadingMessage.textContent = message;
     }
 }
 
-function hideLoadingOverlay() {
+function main_hide_loading_overlay() {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) {
         overlay.remove();
     }
 }
 
-function showErrorDialog(title, message, retryCallback = null) {
+function main_show_error_dialog(title, message, retryCallback = null) {
     const existing = document.getElementById('errorDialog');
     if (existing) existing.remove();
     
-    const retryText = window.i18n?.t('common.retry') || '重试';
-    const closeText = window.i18n?.t('common.close') || '关闭';
+    const retryText = window.i18n?.format_translate('common.retry') || '重试';
+    const closeText = window.i18n?.format_translate('common.close') || '关闭';
     
     const dialog = document.createElement('div');
     dialog.id = 'errorDialog';
@@ -4627,7 +4277,7 @@ function showErrorDialog(title, message, retryCallback = null) {
     });
 }
 
-function collapseFileSidebar() {
+function main_hide_file_sidebar() {
     const fileSidebar = document.querySelector('.file-sidebar');
     if (fileSidebar) {
         fileSidebar.classList.add('collapse');
@@ -4636,37 +4286,16 @@ function collapseFileSidebar() {
         }, { once: true });
     }
     
-    const fileText = window.i18n?.t('toolbar.file') || '文件';
-    const showText = ThemeManager.getShowToolbarText();
+    const fileText = window.i18n?.format_translate('toolbar.file') || '文件';
+    const showText = ThemeManager.theme_fetch_toolbar_text();
     dom.btnSave.innerHTML = `
-        ${ThemeManager.getIcon('file', { alt: fileText })}
+        ${ThemeManager.theme_fetch_icon('file', { alt: fileText })}
         ${showText ? fileText : ''}
     `;
     console.log('收起文件侧边栏');
 }
 
 // 触控反馈
-document.addEventListener('DOMContentLoaded', function() {
-    const buttons = document.querySelectorAll('button');
-    buttons.forEach(button => {
-        button.addEventListener('touchstart', function(e) {
-            this.style.transform = 'scale(0.95)';
-            this.style.transition = 'transform 0.1s ease';
-        }, { passive: true });
-        
-        button.addEventListener('touchend', function(e) {
-            this.style.transform = '';
-        }, { passive: true });
-        
-        button.addEventListener('touchcancel', function(e) {
-            this.style.transform = '';
-        }, { passive: true });
-    });
-    
-    // 设置窗口最小化监听器
-    setupWindowMinimizeListeners();
-});
-
 // ==================== 摄像头功能 ====================
 // 摄像头开启/关闭、帧渲染、拍照、旋转、镜像等
 
@@ -4676,7 +4305,7 @@ document.addEventListener('DOMContentLoaded', function() {
  * @param {Object} options - 可选参数
  * @param {boolean} options.forceClose - 强制关闭（不保存状态用于恢复）
  */
-async function setCameraState(open, options = {}) {
+async function main_update_camera_state(open, options = {}) {
     const { forceClose = false } = options;
     
     if (open) {
@@ -4686,7 +4315,7 @@ async function setCameraState(open, options = {}) {
         
         try {
             // 保存当前源数据
-            saveCurrentSourceData();
+            main_save_current_source_data();
             
             let constraints;
             
@@ -4700,11 +4329,22 @@ async function setCameraState(open, options = {}) {
                     audio: false
                 };
             } else {
+                const desiredFacingMode = state.useFrontCamera ? 'user' : 'environment';
+                let useFacingMode = true;
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    if (videoDevices.length <= 1) {
+                        useFacingMode = false;
+                    }
+                } catch (_) {
+                    useFacingMode = false;
+                }
                 constraints = {
                     video: {
                         width: { ideal: state.cameraWidth || 1280 },
                         height: { ideal: state.cameraHeight || 720 },
-                        facingMode: state.useFrontCamera ? 'user' : 'environment'
+                        ...(useFacingMode ? { facingMode: desiredFacingMode } : {})
                     },
                     audio: false
                 };
@@ -4732,23 +4372,23 @@ async function setCameraState(open, options = {}) {
             state.cameraAvailable = true;
             
             // 切换到摄像头源ID
-            await switchToSource('cam');
+            await main_update_source('cam');
             
             // 重置图片索引，避免摄像头的批注被错误保存到图片
             state.currentImageIndex = -1;
             state.currentFolderIndex = -1;
             state.currentFolderPageIndex = -1;
             
-            hideNoCameraMessage();
+            main_hide_no_camera_message();
             
             const videoTrack = state.cameraStream.getVideoTracks()[0];
             const settings = videoTrack.getSettings();
             const label = videoTrack.label.toLowerCase();
             state.isMirrored = label.includes('front') || label.includes('user') || label.includes('前置') || settings.facingMode === 'user';
             
-            createCameraVideo();
-            createCameraControls();
-            clearSidebarSelection();
+            main_create_camera_video();
+            main_create_camera_controls();
+            main_delete_sidebar_selection();
             
             console.log('摄像头已打开:', videoTrack.label || '未知设备', '分辨率:', settings.width, 'x', settings.height);
         } catch (error) {
@@ -4782,30 +4422,30 @@ async function setCameraState(open, options = {}) {
             dom.cameraVideo.srcObject = null;
         }
         
-        updatePhotoButtonState();
+        main_update_photo_button_state();
         
         // 保存摄像头数据
-        saveCurrentSourceData();
+        main_save_current_source_data();
         
         // 恢复之前的数据
         if (state.currentImage && state.currentImageIndex >= 0) {
             const imgData = state.imageList[state.currentImageIndex];
             if (imgData && imgData.sourceId) {
-                await switchToSource(imgData.sourceId);
+                await main_update_source(imgData.sourceId);
             }
-            drawImageToCenter(state.currentImage);
+            main_render_image_centered(state.currentImage);
         } else if (state.currentImage && state.currentFolderIndex >= 0 && state.currentFolderPageIndex >= 0) {
             const folder = state.fileList[state.currentFolderIndex];
             const page = folder.pages[state.currentFolderPageIndex];
             if (page && page.sourceId) {
-                await switchToSource(page.sourceId);
+                await main_update_source(page.sourceId);
             }
-            drawImageToCenter(state.currentImage);
+            main_render_image_centered(state.currentImage);
         } else {
-            clearImageLayer();
-            clearDrawCanvas();
+            main_delete_image_layer();
+            main_delete_draw_canvas();
             state.strokeHistory = [];
-            clearHistory();
+            history_delete_all();
         }
         
         console.log('摄像头已关闭');
@@ -4815,11 +4455,11 @@ async function setCameraState(open, options = {}) {
 /**
  * 打开/关闭摄像头（用户交互入口）
  */
-async function openCamera() {
+async function main_init_camera() {
     if (state.isCameraOpen) {
-        await setCameraState(false);
+        await main_update_camera_state(false);
     } else {
-        await setCameraState(true);
+        await main_update_camera_state(true);
     }
 }
 
@@ -4827,7 +4467,7 @@ async function openCamera() {
  * 无摄像头模式初始化
  * 在摄像头不可用时调用，确保界面正常显示且功能可用
  */
-async function initWithoutCamera(message) {
+async function main_init_without_camera(message) {
     try {
         state.isCameraOpen = false;
         state.isCameraReady = false;
@@ -4841,23 +4481,23 @@ async function initWithoutCamera(message) {
         
         let bgColor = '#2a2a2a';
         try {
-            const themeColor = ThemeManager.getCanvasBgColor();
+            const themeColor = ThemeManager.theme_fetch_canvas_bg_color();
             if (themeColor && typeof themeColor === 'string' && themeColor.match(/^#[0-9a-fA-F]{6}$/)) {
                 bgColor = themeColor;
             }
         } catch (e) {
             console.warn('获取主题背景色失败，使用默认值:', e);
         }
-        updateCanvasBgColor(bgColor);
+        main_update_canvas_bg_color(bgColor);
         
-        await switchToSource('cam');
+        await main_update_source('cam');
         
-        updateCanvasTransform();
-        updateMoveBound();
-        clampCanvasPosition();
-        updatePhotoButtonState();
+        main_update_canvas_transform();
+        main_update_move_bound();
+        main_update_canvas_position();
+        main_update_photo_button_state();
         
-        showNoCameraMessage(message);
+        main_show_no_camera_message(message);
         
         console.log('无摄像头模式初始化完成');
     } catch (error) {
@@ -4865,23 +4505,23 @@ async function initWithoutCamera(message) {
         
         let fallbackBgColor = '#2a2a2a';
         try {
-            const themeColor = ThemeManager.getCanvasBgColor();
+            const themeColor = ThemeManager.theme_fetch_canvas_bg_color();
             if (themeColor && typeof themeColor === 'string') {
                 fallbackBgColor = themeColor;
             }
         } catch (e) {}
-        updateCanvasBgColor(fallbackBgColor);
+        main_update_canvas_bg_color(fallbackBgColor);
         
-        showNoCameraMessage(message || '摄像头不可用');
+        main_show_no_camera_message(message || '摄像头不可用');
     }
 }
 
 /**
  * 显示无摄像头提示信息
  */
-function showNoCameraMessage(message) {
+function main_show_no_camera_message(message) {
     if (!dom.canvasWrapper) {
-        console.error('showNoCameraMessage: canvasWrapper 不存在');
+        console.error('main_show_no_camera_message: canvasWrapper 不存在');
         return;
     }
     
@@ -4900,7 +4540,7 @@ function showNoCameraMessage(message) {
     };
     
     try {
-        const themeStyle = ThemeManager.getNoCameraMessageStyle();
+        const themeStyle = ThemeManager.theme_fetch_no_camera_style();
         if (themeStyle) {
             style = themeStyle;
         }
@@ -4926,7 +4566,7 @@ function showNoCameraMessage(message) {
     
     msgElement.innerHTML = `
         <div style="font-size: 4vw; color: ${style.textColor}; margin-bottom: 3vh; text-shadow: ${style.textShadow};">( $ _ $ )</div>
-        <div style="font-size: 1.8vw; color: ${style.secondaryTextColor}; margin-bottom: 1.5vh; text-shadow: ${style.textShadow};">${window.i18n?.t('camera.deviceNotFound') || '找不到展台设备'}</div>
+        <div style="font-size: 1.8vw; color: ${style.secondaryTextColor}; margin-bottom: 1.5vh; text-shadow: ${style.textShadow};">${window.i18n?.format_translate('camera.deviceNotFound') || '找不到展台设备'}</div>
         <div style="font-size: 1.2vw; color: ${style.tertiaryTextColor}; text-shadow: ${style.textShadow};">${message}</div>
     `;
 }
@@ -4934,14 +4574,14 @@ function showNoCameraMessage(message) {
 /**
  * 隐藏无摄像头提示信息
  */
-function hideNoCameraMessage() {
+function main_hide_no_camera_message() {
     const msgElement = document.getElementById('noCameraMessage');
     if (msgElement) {
         msgElement.style.display = 'none';
     }
 }
 
-function clearSidebarSelection() {
+function main_delete_sidebar_selection() {
     document.querySelectorAll('.sidebar:not(.file-sidebar) .sidebar-image-item').forEach(item => {
         item.classList.remove('active');
     });
@@ -4952,18 +4592,18 @@ function clearSidebarSelection() {
     state.currentFolderPageIndex = -1;
 }
 
-async function switchCamera() {
+async function main_update_camera() {
     state.useFrontCamera = !state.useFrontCamera;
     
     if (state.isCameraOpen) {
-        await setCameraState(false);
-        await setCameraState(true);
+        await main_update_camera_state(false);
+        await main_update_camera_state(true);
     }
     
     console.log(state.useFrontCamera ? '已切换到前置摄像头' : '已切换到后置摄像头');
 }
 
-function createCameraVideo() {
+function main_create_camera_video() {
     const video = dom.cameraVideo;
     if (!video) {
         console.error('找不到 video 元素');
@@ -4976,7 +4616,7 @@ function createCameraVideo() {
     video.onloadedmetadata = () => {
         state.isCameraReady = true;
         console.log('摄像头视频就绪:', video.videoWidth, 'x', video.videoHeight);
-        updateCameraVideoStyle();
+        main_update_camera_video_style();
         video.style.display = 'block';
     };
 }
@@ -4987,7 +4627,7 @@ let lastVideoStyleCache = {
     rotation: -1, isMirrored: null
 };
 
-function updateCameraVideoStyle() {
+function main_update_camera_video_style() {
     const video = dom.cameraVideo;
     if (!video) return;
     
@@ -5053,18 +4693,18 @@ function updateCameraVideoStyle() {
     `;
 }
 
-function startCameraPreview() {
+function main_start_camera_preview() {
     const video = dom.cameraVideo;
     if (!video) return;
     
-    updateCameraVideoStyle();
+    main_update_camera_video_style();
 }
 
-function createCameraControls() {
-    updatePhotoButtonState();
+function main_create_camera_controls() {
+    main_update_photo_button_state();
 }
 
-async function captureCamera() {
+async function main_save_camera_image() {
     const video = document.getElementById('cameraVideo');
     if (!video) {
         console.error('找不到视频元素');
@@ -5073,9 +4713,9 @@ async function captureCamera() {
     
     if (!state.isCameraReady) {
         console.error('摄像头尚未就绪');
-        showErrorDialog(
-            window.i18n?.t('camera.notReady') || '摄像头未就绪',
-            window.i18n?.t('camera.notReadyDesc') || '摄像头尚未就绪，请稍后再试'
+        main_show_error_dialog(
+            window.i18n?.format_translate('camera.notReady') || '摄像头未就绪',
+            window.i18n?.format_translate('camera.notReadyDesc') || '摄像头尚未就绪，请稍后再试'
         );
         return;
     }
@@ -5085,9 +4725,9 @@ async function captureCamera() {
     
     if (!videoW || !videoH) {
         console.error('视频尺寸无效:', videoW, videoH);
-        showErrorDialog(
-            window.i18n?.t('camera.notReady') || '摄像头未就绪',
-            window.i18n?.t('camera.notReadyDesc') || '摄像头尚未就绪，请稍后再试'
+        main_show_error_dialog(
+            window.i18n?.format_translate('camera.notReady') || '摄像头未就绪',
+            window.i18n?.format_translate('camera.notReadyDesc') || '摄像头尚未就绪，请稍后再试'
         );
         return;
     }
@@ -5095,7 +4735,7 @@ async function captureCamera() {
     console.log('捕获摄像头画面:', videoW, 'x', videoH);
     
     // 保存摄像头批注数据
-    saveCurrentSourceData();
+    main_save_current_source_data();
     
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = videoW;
@@ -5123,9 +4763,9 @@ async function captureCamera() {
     if (window.__TAURI__) {
         try {
             const { invoke } = window.__TAURI__.core;
-            const dataUrl = await blobToDataUrl(blob);
+            const dataUrl = await main_format_blob_to_data_url(blob);
             
-            const result = await invoke('save_image', { 
+            const result = await invoke('image_save_file', { 
                 imageData: dataUrl,
                 prefix: 'photo'
             });
@@ -5139,9 +4779,9 @@ async function captureCamera() {
     const img = new Image();
     img.src = blobUrl;
     img.onload = () => {
-        const photoName = window.i18n?.t('camera.photoName', { n: state.imageList.length + 1 }) || `拍摄${state.imageList.length + 1}`;
-        addImageToListNoHighlight(img, photoName);
-        expandSidebarIfCollapsed();
+        const photoName = window.i18n?.format_translate('camera.photoName', { n: state.imageList.length + 1 }) || `拍摄${state.imageList.length + 1}`;
+        main_save_image_to_list_no_highlight(img, photoName);
+        main_show_sidebar_if_hidden();
         URL.revokeObjectURL(blobUrl);
         console.log('已捕获摄像头画面并保存到图片列表');
     };
@@ -5151,7 +4791,7 @@ async function captureCamera() {
     };
 }
 
-async function blobToDataUrl(blob) {
+async function main_format_blob_to_data_url(blob) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
@@ -5160,13 +4800,13 @@ async function blobToDataUrl(blob) {
     });
 }
 
-function expandSidebarIfCollapsed() {
+function main_show_sidebar_if_hidden() {
     const sidebar = document.querySelector('.sidebar');
     if (!sidebar) {
-        expandSidebar();
+        main_show_sidebar();
     } else if (sidebar.classList.contains('file-sidebar')) {
         sidebar.remove();
-        expandSidebar();
+        main_show_sidebar();
     }
 }
 
@@ -5178,7 +4818,7 @@ function expandSidebarIfCollapsed() {
  * - 支持多选
  * - 批量导入时使用Rust并行生成缩略图
  */
-async function importImage() {
+async function main_load_image() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
@@ -5190,11 +4830,11 @@ async function importImage() {
         
         // 保存当前批注数据
         if (currentSourceId) {
-            saveCurrentSourceData();
+            main_save_current_source_data();
         }
         
         if (state.isCameraOpen) {
-            await setCameraState(false);
+            await main_update_camera_state(false);
         }
         
         // 检查是否有大图片（大于2.5MB）
@@ -5202,7 +4842,7 @@ async function importImage() {
         
         // 如果有大图片或者多个文件，显示加载动画
         if (files.length > 1 || hasLargeImage) {
-            showLoadingOverlay(window.i18n?.t('loading.readingImages') || '正在读取图片...');
+            main_show_loading_overlay(window.i18n?.format_translate('loading.readingImages') || '正在读取图片...');
         }
         
         const imageDataList = [];
@@ -5211,12 +4851,12 @@ async function importImage() {
             const file = files[i];
             
             if (files.length > 1 || file.size > 2.5 * 1024 * 1024) {
-                updateLoadingProgress(window.i18n?.t('loading.readingImage', { current: i + 1, total: files.length }) || `正在读取图片 ${i + 1}/${files.length}...`);
+                main_update_loading_progress(window.i18n?.format_translate('loading.readingImage', { current: i + 1, total: files.length }) || `正在读取图片 ${i + 1}/${files.length}...`);
             }
             
             const blobUrl = URL.createObjectURL(file);
             
-            const imageName = file.name || window.i18n?.t('sidebar.imageAlt', { n: state.imageList.length + imageDataList.length + 1 }) || `图片${state.imageList.length + imageDataList.length + 1}`;
+            const imageName = file.name || window.i18n?.format_translate('sidebar.imageAlt', { n: state.imageList.length + imageDataList.length + 1 }) || `图片${state.imageList.length + imageDataList.length + 1}`;
             imageDataList.push({
                 data: blobUrl,
                 blob: file,
@@ -5251,7 +4891,7 @@ async function importImage() {
                     canvasX: -(DRAW_CONFIG.canvasW - DRAW_CONFIG.screenW) / 2,
                     canvasY: -(DRAW_CONFIG.canvasH - DRAW_CONFIG.screenH) / 2
                 },
-                sourceId: generateSourceId('pic')
+                sourceId: main_create_source_id('pic')
             };
             
             state.imageList.push(newImgData);
@@ -5260,28 +4900,28 @@ async function importImage() {
             state.currentFolderIndex = -1;
             state.currentFolderPageIndex = -1;
             
-            clearDrawCanvas();
+            main_delete_draw_canvas();
             state.strokeHistory = [];
             state.baseImageURL = null;
             state.baseImageObj = null;
-            clearHistory();
+            history_delete_all();
             state.scale = 1;
             state.canvasX = -(DRAW_CONFIG.canvasW - DRAW_CONFIG.screenW) / 2;
             state.canvasY = -(DRAW_CONFIG.canvasH - DRAW_CONFIG.screenH) / 2;
-            updateMoveBound();
-            updateCanvasTransform();
-            updateHistoryBtnStatus();
+            main_update_move_bound();
+            main_update_canvas_transform();
+            main_update_history_button_status();
             
             if (isLast) {
-                drawImageToCenter(img);
-                updateSidebarContent();
-                updatePhotoButtonState();
+                main_render_image_centered(img);
+                main_update_sidebar_content();
+                main_update_photo_button_state();
             }
         }
         
         // 如果显示了加载动画，无论文件数量多少，都需要隐藏
         if (files.length > 1 || hasLargeImage) {
-            hideLoadingOverlay();
+            main_hide_loading_overlay();
         }
         
         console.log(`已导入 ${imageDataList.length} 张图片`);
@@ -5290,7 +4930,7 @@ async function importImage() {
     input.click();
 }
 
-async function addImageToList(img, name, isLast = true) {
+async function main_save_image_to_list(img, name, isLast = true) {
     const blob = await fetch(img.src).then(r => r.blob());
     const blobUrl = URL.createObjectURL(blob);
     
@@ -5300,7 +4940,7 @@ async function addImageToList(img, name, isLast = true) {
         name: name,
         width: img.width,
         height: img.height,
-        sourceId: generateSourceId('pic')
+        sourceId: main_create_source_id('pic')
     };
     
     state.imageList.push(imgData);
@@ -5309,21 +4949,21 @@ async function addImageToList(img, name, isLast = true) {
     state.currentFolderIndex = -1;
     state.currentFolderPageIndex = -1;
     
-    await switchToSource(imgData.sourceId);
+    await main_update_source(imgData.sourceId);
     
     if (isLast) {
         if (state.isCameraOpen) {
-            await setCameraState(false);
+            await main_update_camera_state(false);
         }
         img.src = blobUrl;
-        drawImageToCenter(img);
+        main_render_image_centered(img);
         
-        updateSidebarContent();
-        updatePhotoButtonState();
+        main_update_sidebar_content();
+        main_update_photo_button_state();
     }
 }
 
-async function addImageToListNoHighlight(img, name) {
+async function main_save_image_to_list_no_highlight(img, name) {
     const blob = await fetch(img.src).then(r => r.blob());
     const blobUrl = URL.createObjectURL(blob);
     
@@ -5333,22 +4973,22 @@ async function addImageToListNoHighlight(img, name) {
         name: name,
         width: img.width,
         height: img.height,
-        sourceId: generateSourceId('pic')
+        sourceId: main_create_source_id('pic')
     };
     
     state.imageList.push(imgData);
     
-    updateSidebarContent();
+    main_update_sidebar_content();
 }
 
 // 暴露必要的函数到 window 对象，供 doc-scan.js 使用
-window.addImageToListNoHighlight = addImageToListNoHighlight;
-window.updateSidebarContent = updateSidebarContent;
-window.clearAllDrawings = clearAllDrawings;
+window.main_save_image_to_list_no_highlight = main_save_image_to_list_no_highlight;
+window.main_update_sidebar_content = main_update_sidebar_content;
+window.main_delete_all_drawings = main_delete_all_drawings;
 
-function drawImageToCenter(img) {
-    clearImageLayer();
-    hideNoCameraMessage();
+function main_render_image_centered(img) {
+    main_delete_image_layer();
+    main_hide_no_camera_message();
     
     const screenW = DRAW_CONFIG.screenW;
     const screenH = DRAW_CONFIG.screenH;
@@ -5379,7 +5019,7 @@ function drawImageToCenter(img) {
     dom.imageElement.style.height = drawH + 'px';
 }
 
-function clearImageLayer() {
+function main_delete_image_layer() {
     dom.imageElement.src = '';
     dom.imageElement.style.left = '0';
     dom.imageElement.style.top = '0';
@@ -5387,7 +5027,7 @@ function clearImageLayer() {
     dom.imageElement.style.height = DRAW_CONFIG.canvasH + 'px';
 }
 
-function cleanupImageBlobUrls() {
+function main_delete_image_blob_urls() {
     state.imageList.forEach(imgData => {
         if (imgData.full && imgData.full.startsWith('blob:')) {
             URL.revokeObjectURL(imgData.full);
@@ -5398,7 +5038,7 @@ function cleanupImageBlobUrls() {
     });
 }
 
-function cleanupPdfBlobUrls(docNumber) {
+function main_delete_pdf_blob_urls(docNumber) {
     const folder = state.fileList.find(f => f.docNumber === docNumber);
     if (folder) {
         folder.pages.forEach(page => {
@@ -5412,7 +5052,7 @@ function cleanupPdfBlobUrls(docNumber) {
     }
 }
 
-function cleanupAllPdfBlobUrls() {
+function main_delete_all_pdf_blob_urls() {
     state.fileList.forEach(folder => {
         folder.pages.forEach(page => {
             if (page.full && page.full.startsWith('blob:')) {
@@ -5424,3 +5064,28 @@ function cleanupAllPdfBlobUrls() {
         });
     });
 }
+
+window.main_setup_all_events = main_setup_all_events;
+window.main_setup_pdf_file_open = main_setup_pdf_file_open;
+window.main_init_camera = main_init_camera;
+window.main_update_camera_state = main_update_camera_state;
+window.main_init_without_camera = main_init_without_camera;
+window.main_show_error_dialog = main_show_error_dialog;
+window.main_handle_resize = main_handle_resize;
+window.main_submit_stroke = main_submit_stroke;
+window.main_update_canvas_bg_color = main_update_canvas_bg_color;
+window.main_calc_rgb_to_hex = main_calc_rgb_to_hex;
+window.main_update_color_buttons = main_update_color_buttons;
+window.main_delete_image_blob_urls = main_delete_image_blob_urls;
+window.main_delete_all_pdf_blob_urls = main_delete_all_pdf_blob_urls;
+window.main_setup_minimize_listeners = main_setup_minimize_listeners;
+window.main_update_move_bound = main_update_move_bound;
+window.main_update_pen_style = main_update_pen_style;
+window.main_update_eraser_hint_size = main_update_eraser_hint_size;
+window.main_update_canvas_transform = main_update_canvas_transform;
+window.main_init_pdfjs = main_init_pdfjs;
+window.main_wait_pdfjs = main_wait_pdfjs;
+window.main_hide_pen_control_panel = main_hide_pen_control_panel;
+window.main_hide_settings_panel = main_hide_settings_panel;
+window.main_render_image_centered = main_render_image_centered;
+window.main_render_all_strokes = main_render_all_strokes;

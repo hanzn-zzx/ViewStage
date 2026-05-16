@@ -2,14 +2,14 @@ const DarkTheme = {
   name: 'dark',
   config: null,
   
-  getBasePath() {
+  fetch_base_path() {
     const parts = window.location.pathname.split('/').filter(p => p);
     const depth = Math.max(0, parts.length - 1);
     return '../'.repeat(depth);
   },
   
-  async load(isSettingsPage = false) {
-    const base = this.getBasePath();
+  async load_theme(isSettingsPage = false) {
+    const base = this.fetch_base_path();
     const response = await fetch(`${base}themes/dark/theme.json`);
     this.config = await response.json();
     
@@ -26,21 +26,21 @@ const DarkTheme = {
     }
   },
   
-  getIconPath(iconName) {
+  fetch_icon_path(iconName) {
     const actualName = this.config?.icons?.[iconName] || iconName;
-    const base = this.getBasePath();
+    const base = this.fetch_base_path();
     return `${base}themes/dark/icons/${actualName}.svg`;
   },
   
-  getShowToolbarText() {
+  fetch_toolbar_text() {
     return this.config?.showToolbarText !== false;
   },
   
-  getCanvasBgColor() {
+  fetch_canvas_bg_color() {
     return this.config?.canvasBgColor || '#1a1a1a';
   },
   
-  getNoCameraMessageStyle() {
+  fetch_no_camera_style() {
     return this.config?.noCameraMessage || {
       textColor: '#ffffff',
       secondaryTextColor: 'rgba(255,255,255,0.7)',
@@ -49,7 +49,7 @@ const DarkTheme = {
     };
   },
 
-  getShowAuroraEffect() {
+  fetch_aurora_effect() {
     return this.config?.showAuroraEffect !== false;
   }
 };
