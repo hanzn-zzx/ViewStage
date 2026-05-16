@@ -457,6 +457,7 @@ function main_load_source_data(sourceId) {
         state.strokeHistory = main_main_stroke_clone_deep(data.strokeHistory || []);
         state.baseImageURL = data.baseImageURL || null;
         state.baseImageObj = null;
+        history_delete_all();
         
         data.timestamp = Date.now();
         
@@ -1817,6 +1818,11 @@ function main_show_eraser_hint() {
 
 function main_hide_eraser_hint() {
     dom.eraserHint.classList.remove('active');
+    if (eraserHintRafId !== null) {
+        cancelAnimationFrame(eraserHintRafId);
+        eraserHintRafId = null;
+    }
+    eraserHintPendingPos = null;
 }
 
 function main_show_pen_control_panel(targetBtn, mode) {
@@ -2027,10 +2033,6 @@ async function main_handle_pointer_up(e) {
     if (state.isDrawing) {
         state.isDrawing = false;
         main_hide_drawing_mode();
-        if (state.drawRafId) {
-            cancelAnimationFrame(state.drawRafId);
-            state.drawRafId = null;
-        }
         await main_submit_stroke();
     }
 }
@@ -2046,10 +2048,6 @@ async function main_handle_pointer_leave(e) {
     if (state.isDrawing) {
         state.isDrawing = false;
         main_hide_drawing_mode();
-        if (state.drawRafId) {
-            cancelAnimationFrame(state.drawRafId);
-            state.drawRafId = null;
-        }
         await main_submit_stroke();
     }
 }
@@ -2323,10 +2321,6 @@ async function main_handle_touch_end(e) {
         if (state.isDrawing) {
             state.isDrawing = false;
             main_hide_drawing_mode();
-            if (state.drawRafId) {
-                cancelAnimationFrame(state.drawRafId);
-                state.drawRafId = null;
-            }
             await main_submit_stroke();
         }
     } else if (e.touches.length === 1) {
@@ -2902,14 +2896,16 @@ async function main_render_strokes_to_context(ctx, strokes) {
     for (const stroke of strokes) {
         if (!stroke.points || stroke.points.length < 1) continue;
         
+        const strokeScale = stroke.scale || 1;
+        
         if (stroke.type === 'erase') {
             ctx.globalCompositeOperation = 'destination-out';
             ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
-            ctx.lineWidth = stroke.eraserSize || DRAW_CONFIG.eraserSize;
+            ctx.lineWidth = (stroke.eraserSize || DRAW_CONFIG.eraserSize) / strokeScale;
         } else {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = stroke.color || DRAW_CONFIG.penColor;
-            ctx.lineWidth = stroke.lineWidth || DRAW_CONFIG.penWidth;
+            ctx.lineWidth = (stroke.lineWidth || DRAW_CONFIG.penWidth) / strokeScale;
         }
         
         const path = new Path2D();
@@ -2924,7 +2920,7 @@ async function main_render_strokes_to_context(ctx, strokes) {
             path.moveTo(firstPoint.fromX, firstPoint.fromY);
             path.lineTo(firstPoint.toX, firstPoint.toY);
             for (let i = 1; i < stroke.points.length; i++) {
-                path.moveTo(stroke.points[i].fromX, stroke.points[i].fromY);
+                path.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
                 path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
             }
         }
@@ -2966,7 +2962,8 @@ async function main_handle_compact_strokes() {
     if (commandsToCompact.length === 0) return;
     
     const loadId = ++state.baseImageLoadId;
-    const compactSnapshotId = ++state.compactSnapshotId || (state.compactSnapshotId = 1);
+    state.compactSnapshotId = (state.compactSnapshotId || 0) + 1;
+    const compactSnapshotId = state.compactSnapshotId;
     
     const beforeStrokes = main_main_stroke_clone_deep(state.strokeHistory);
     const frozenImageURL = state.baseImageURL;
