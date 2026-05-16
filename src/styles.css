@@ -181,10 +181,6 @@ body {
     contain: layout style paint;
 }
 
-.camera-video.scaling {
-    opacity: 0;
-}
-
 .canvas-draw.drawing {
     cursor: crosshair;
 }

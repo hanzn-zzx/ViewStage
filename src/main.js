@@ -334,7 +334,7 @@ let state = {
     
     // 缩放状态 (触控双指)
     startScale: 1,                 // 缩放起始比例
-    startDistance: 0,              // 双指起始距离
+    startDistanceSq: 0,            // 双指起始距离的平方
     startScaleX: 0,                // 缩放中心X
     startScaleY: 0,                // 缩放中心Y
     startCanvasX: 0,               // 缩放起始画布X
@@ -2546,10 +2546,6 @@ function handleTouchStart(e) {
         state.startCanvasX = state.canvasX;
         state.startCanvasY = state.canvasY;
         dom.canvasWrapper.classList.add('dragging');
-        
-        if (state.isCameraOpen && dom.cameraVideo) {
-            dom.cameraVideo.classList.add('scaling');
-        }
     }
 }
 
@@ -2629,10 +2625,6 @@ async function handleTouchEnd(e) {
         dom.canvasWrapper.classList.remove('dragging');
         dom.drawCanvas.classList.remove('dragging');
         
-        if (state.isCameraOpen && dom.cameraVideo) {
-            dom.cameraVideo.classList.remove('scaling');
-        }
-        
         updateMoveBound();
         clampCanvasPosition();
         dom.canvasWrapper.style.transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
@@ -2648,10 +2640,6 @@ async function handleTouchEnd(e) {
         }
     } else if (e.touches.length === 1) {
         state.isScaling = false;
-        if (state.isCameraOpen && dom.cameraVideo) {
-            dom.cameraVideo.classList.remove('scaling');
-        }
-        
         updateMoveBound();
         clampCanvasPosition();
         dom.canvasWrapper.style.transform = `translate3d(${state.canvasX}px, ${state.canvasY}px, 0) scale(${state.scale})`;
