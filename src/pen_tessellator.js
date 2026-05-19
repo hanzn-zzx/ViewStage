@@ -8,13 +8,13 @@ class PenTessellator {
         const density = options.density || 1;
         const storedWidths = options.storedWidths || null;
 
-        const segs = this._tessellator_build_segments(points, base_width, density, options.noStartTaper, options.noEndTaper, storedWidths);
+        const segs = this._tessellator_build_segments(points, base_width, density, options.noStartTaper, storedWidths);
         if (!segs || segs.length < 1) return null;
 
         return { segments: segs, color };
     }
 
-    _tessellator_build_segments(points, base_width, density = 1, noStartTaper = false, noEndTaper = false, storedWidths = null) {
+    _tessellator_build_segments(points, base_width, density = 1, noStartTaper = false, storedWidths = null) {
         if (points.length < 1) return null;
 
         // 当钢笔效果开启时，基础笔宽增加5px
@@ -89,16 +89,6 @@ class PenTessellator {
                     line_widths[i] = minStart + (line_widths[i] - minStart) * eased;
                 }
             }
-
-            if (!noEndTaper) {
-                const fromEnd = totalSegments - 1 - i;
-                if (fromEnd < taperSegments) {
-                    const taperT = (fromEnd + 1) / taperSegments;
-                    const eased = taperT * taperT * (3 - 2 * taperT);
-                    const minEnd = base_width * 0.15;
-                    line_widths[i] = minEnd + (line_widths[i] - minEnd) * eased;
-                }
-            }
         }
 
         const segments = [];
@@ -145,6 +135,18 @@ class PenTessellator {
                 ctx.beginPath();
                 ctx.moveTo(last_x, last_y);
                 ctx.quadraticCurveTo(seg.x1, seg.y1, mid_x, mid_y);
+                ctx.stroke();
+            }
+
+            // 最后一个 segment：补上 mid → toX/Y 的尖部直线段
+            // 与 batch-draw 中 batch_draw_handle_end 画 _lastMidX/Y → _lastToX/Y 对应
+            if (i === segments.length - 1) {
+                const mid_x = (seg.x1 + seg.x2) / 2;
+                const mid_y = (seg.y1 + seg.y2) / 2;
+                ctx.lineWidth = seg.line_width;
+                ctx.beginPath();
+                ctx.moveTo(mid_x, mid_y);
+                ctx.lineTo(seg.x2, seg.y2);
                 ctx.stroke();
             }
         }

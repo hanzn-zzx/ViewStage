@@ -229,20 +229,6 @@ class RealPenManager {
                 });
             }
 
-            // 仅应用收笔渐变（起笔渐变已由 batch-draw 实时计算）
-            // 算法与 batch-draw _apply_end_taper 保持一致
-            if (!stroke.noEndTaper && segments.length >= 2) {
-                const taperLen = Math.min(segments.length, 6);
-                const startIdx = segments.length - taperLen;
-                for (let i = startIdx; i < segments.length; i++) {
-                    const localIdx = i - startIdx;
-                    const t = localIdx / (taperLen - 1);
-                    const eased = 1 - t * t * (3 - 2 * t);
-                    const widthScale = 0.15 + eased * 0.85;
-                    segments[i].line_width = Math.max(0.5, segments[i].line_width * widthScale);
-                }
-            }
-
             const result = { segments, color };
             if (result) {
                 this.cached_tessellated.set(stroke, result);
@@ -293,7 +279,7 @@ class RealPenManager {
 
         const result = this.tessellator.tessellator_build_stroke_from_stroke_data(
             { points: stroke_data, lineWidth: base_width, color },
-            { density, noStartTaper: stroke.noStartTaper, noEndTaper: stroke.noEndTaper }
+            { density, noStartTaper: stroke.noStartTaper }
         );
         
         if (result) {
@@ -331,7 +317,6 @@ function main_stroke_clone(strokes, deep = false) {
             variableWidths: stroke.variableWidths ? [...stroke.variableWidths] : null,
             storedWidths: stroke.storedWidths ? [...stroke.storedWidths] : undefined,
             noStartTaper: stroke.noStartTaper,
-            noEndTaper: stroke.noEndTaper,
             savedStrokeHistory: stroke.savedStrokeHistory ? main_stroke_clone(stroke.savedStrokeHistory, true) : undefined,
             savedBaseImageURL: stroke.savedBaseImageURL
         }));
@@ -347,7 +332,6 @@ function main_stroke_clone(strokes, deep = false) {
         variableWidths: stroke.variableWidths,
         storedWidths: stroke.storedWidths,
         noStartTaper: stroke.noStartTaper,
-        noEndTaper: stroke.noEndTaper,
         savedStrokeHistory: stroke.savedStrokeHistory,
         savedBaseImageURL: stroke.savedBaseImageURL
     }));
@@ -2949,8 +2933,7 @@ function main_calc_split_strokes_by_eraser(drawStroke, eraserStroke, penEffectMo
             lineWidth: drawStroke.lineWidth,
             scale: drawStroke.scale,
             bounds: main_calc_stroke_bounds(pts),
-            noStartTaper: !isFirst,
-            noEndTaper: !isLast
+            noStartTaper: !isFirst
         };
     });
     
