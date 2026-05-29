@@ -1,5 +1,5 @@
 const TILE_COLS = 4;
-const TILE_ROWS = 2;
+const TILE_ROWS = 4;
 
 class TileRenderer {
     constructor() {
