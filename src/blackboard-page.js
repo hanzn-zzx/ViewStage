@@ -28,6 +28,10 @@ export class BlackboardPageManager {
         const page = {
             stroke_history: [],
             snapshot_url: null,
+            undo_list: [],
+            redo_list: [],
+            tile_snapshots: null,
+            snapshot_dirty: true,
         };
         this.pages_list.push(page);
         this.current_index = this.pages_list.length - 1;

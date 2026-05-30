@@ -79,86 +79,6 @@ export class DrawCommand extends Command {
     }
 }
 
-// 橡皮擦命令：向 strokeHistory 添加或移除一笔（标记为不可压缩）
-export class EraseCommand extends Command {
-    constructor(options) {
-        super('erase');
-        this.stroke = options.stroke;
-        this.strokeHistoryRef = options.strokeHistoryRef;
-        this.redrawFn = options.redrawFn;
-    }
-
-    async execute(needRedraw = true) {
-        if (!this.strokeHistoryRef.includes(this.stroke)) {
-            this.strokeHistoryRef.push(this.stroke);
-        }
-        if (needRedraw && this.redrawFn) await this.redrawFn();
-    }
-
-    async undo() {
-        const index = this.strokeHistoryRef.indexOf(this.stroke);
-        if (index > -1) {
-            this.strokeHistoryRef.splice(index, 1);
-        }
-        if (this.redrawFn) await this.redrawFn();
-    }
-
-    async redo() {
-        await this.execute();
-    }
-
-    can_compact() {
-        return false;
-    }
-}
-
-// 钢笔切割命令：将原始笔画替换为多条子笔画（按原始位置恢复）
-export class PenEraseCommand extends Command {
-    constructor(options) {
-        super('pen_erase');
-        this.pairs = options.pairs || [];
-        this.strokeHistoryRef = options.strokeHistoryRef;
-        this.redrawFn = options.redrawFn;
-    }
-
-    async execute(needRedraw = true) {
-        for (const pair of this.pairs) {
-            const idx = this.strokeHistoryRef.indexOf(pair.originalStroke);
-            if (idx > -1) {
-                pair.insertIndex = idx;
-                this.strokeHistoryRef.splice(idx, 1, ...pair.subStrokes);
-            }
-        }
-        if (needRedraw && this.redrawFn) await this.redrawFn();
-    }
-
-    async undo() {
-        for (const pair of this.pairs) {
-            for (let i = pair.subStrokes.length - 1; i >= 0; i--) {
-                const idx = this.strokeHistoryRef.indexOf(pair.subStrokes[i]);
-                if (idx > -1) this.strokeHistoryRef.splice(idx, 1);
-            }
-        }
-        // 按原始位置升序插入，确保靠前的 original 先恢复，位置不偏移
-        const sortedPairs = [...this.pairs].sort((a, b) => a.insertIndex - b.insertIndex);
-        for (const pair of sortedPairs) {
-            if (!this.strokeHistoryRef.includes(pair.originalStroke)) {
-                const insertAt = Math.min(pair.insertIndex, this.strokeHistoryRef.length);
-                this.strokeHistoryRef.splice(insertAt, 0, pair.originalStroke);
-            }
-        }
-        if (this.redrawFn) await this.redrawFn();
-    }
-
-    async redo() {
-        await this.execute(true);
-    }
-
-    can_compact() {
-        return true;
-    }
-}
-
 // 清空命令：记录清空前全部笔画和底图，可一键恢复
 export class ClearCommand extends Command {
     constructor(options) {
@@ -303,8 +223,8 @@ export async function history_handle_undo() {
     let command;
     try {
         command = history_state.undo_list.pop();
-        await command.undo();
         history_state.redo_list.push(command);
+        await command.undo();
     } finally {
         history_state.is_executing = false;
     }
@@ -324,8 +244,8 @@ export async function history_handle_redo() {
     let command;
     try {
         command = history_state.redo_list.pop();
-        await command.redo();
         history_state.undo_list.push(command);
+        await command.redo();
     } finally {
         history_state.is_executing = false;
     }
@@ -383,8 +303,7 @@ export function history_fetch_redo_stack() {
     return history_state.redo_list;
 }
 
-// 触发状态变更回调
-function history_handle_state_change() {
+export function history_handle_state_change() {
     if (history_state.on_state_change) {
         history_state.on_state_change({
             can_undo: history_validate_undo(),

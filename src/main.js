@@ -9,10 +9,8 @@ import ThemeManager from './themes/theme.js';
 import {
     history_execute_command,
     DrawCommand,
-    EraseCommand,
     ClearCommand,
     SnapshotCommand,
-    PenEraseCommand,
     history_validate_undo,
     history_handle_undo,
     history_delete_all,
@@ -1675,18 +1673,18 @@ async function main_update_mode(mode) {
             case 'move':
                 if (dom.btnMove) dom.btnMove.classList.add('primary-btn');
                 if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'grab';
-                main_hide_eraser_hint();
+                bb._hide_eraser_hint();
                 break;
             case 'comment':
                 if (dom.btnComment) dom.btnComment.classList.add('primary-btn');
                 if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'crosshair';
-                main_hide_eraser_hint();
+                bb._hide_eraser_hint();
                 main_update_pen_style();
                 break;
             case 'eraser':
                 if (dom.btnEraser) dom.btnEraser.classList.add('primary-btn');
                 if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'none';
-                main_show_eraser_hint();
+                bb._show_eraser_hint();
                 main_update_eraser_style();
                 break;
         }
@@ -2674,8 +2672,8 @@ function main_start_stroke(type) {
     state.currentStroke = {
         type: type,
         points: [],
-        color: DRAW_CONFIG.penColor,
-        lineWidth: DRAW_CONFIG.penWidth * invScale,
+        color: type === 'draw' ? DRAW_CONFIG.penColor : '#000000',
+        lineWidth: (type === 'draw' ? DRAW_CONFIG.penWidth : DRAW_CONFIG.eraserSize) * invScale,
         eraserSize: DRAW_CONFIG.eraserSize * invScale,
         eraserSizeRaw: DRAW_CONFIG.eraserSize,
         scale: state.scale,
@@ -2734,311 +2732,35 @@ async function main_submit_stroke() {
             state.currentStroke.storedWidths = [...storedWidths];
         }
         
+        const strokeBounds = state.currentStroke && state.currentStroke.bounds
+            ? { ...state.currentStroke.bounds } : null;
+        
+        const cmd = new DrawCommand({
+            stroke: state.currentStroke,
+            strokeHistoryRef: state.strokeHistory,
+            redrawFn: () => main_render_all_strokes(strokeBounds)
+        });
+        await history_execute_command(cmd, false);
+
         if (state.currentStroke.type === 'erase') {
-            await main_handle_eraser_stroke(state.currentStroke);
             if (window.tileRenderer) {
-                window.tileRenderer.mark_all();
+                await main_render_all_strokes(strokeBounds);
             }
         } else {
-            const strokeBounds = state.currentStroke && state.currentStroke.bounds ? { ...state.currentStroke.bounds } : null;
-            const cmd = new DrawCommand({
-                stroke: state.currentStroke,
-                strokeHistoryRef: state.strokeHistory,
-                redrawFn: () => main_render_all_strokes(strokeBounds)
-            });
-            await history_execute_command(cmd, false);
-            
             if (window.tileRenderer) {
                 await window.tileRenderer.add_stroke(state.currentStroke);
             }
-            
-            if (history_validate_compact()) {
-                main_init_compact();
-            }
+        }
+
+        if (history_validate_compact()) {
+            main_init_compact();
         }
     }
     state.currentStroke = null;
-    
+
     await batchDrawManager.batch_draw_handle_end();
-    
+
     batchDrawManager.batch_draw_delete_all();
-}
-
-async function main_handle_eraser_stroke(eraserStroke) {
-    const penEffectMode = get_pen_effect_mode();
-    const isPenEffectOn = penEffectMode !== 'off';
-    
-    // 钢笔效果 ON + 无 baseImage：使用笔画分割方案
-    if (isPenEffectOn && !state.baseImageObj && !state.baseImageURL) {
-        const splitResults = [];
-        
-        for (const stroke of state.strokeHistory) {
-            if (stroke.type !== 'draw' && stroke.type !== 'comment') continue;
-            
-            const result = main_calc_split_strokes_by_eraser(stroke, eraserStroke, penEffectMode);
-            if (result) {
-                splitResults.push({
-                    originalStroke: result.originalStroke,
-                    subStrokes: result.subStrokes,
-                    insertIndex: -1
-                });
-            }
-        }
-        
-        if (splitResults.length > 0) {
-            const combinedBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-            for (const pair of splitResults) {
-                const b = pair.originalStroke.bounds;
-                if (b) {
-                    combinedBounds.minX = Math.min(combinedBounds.minX, b.minX);
-                    combinedBounds.minY = Math.min(combinedBounds.minY, b.minY);
-                    combinedBounds.maxX = Math.max(combinedBounds.maxX, b.maxX);
-                    combinedBounds.maxY = Math.max(combinedBounds.maxY, b.maxY);
-                }
-                for (const sub of pair.subStrokes) {
-                    const sb = sub.bounds;
-                    if (sb) {
-                        combinedBounds.minX = Math.min(combinedBounds.minX, sb.minX);
-                        combinedBounds.minY = Math.min(combinedBounds.minY, sb.minY);
-                        combinedBounds.maxX = Math.max(combinedBounds.maxX, sb.maxX);
-                        combinedBounds.maxY = Math.max(combinedBounds.maxY, sb.maxY);
-                    }
-                }
-            }
-            const penEraseBounds = isFinite(combinedBounds.minX) ? combinedBounds : null;
-            const cmd = new PenEraseCommand({
-                pairs: splitResults,
-                strokeHistoryRef: state.strokeHistory,
-                redrawFn: () => main_render_all_strokes(penEraseBounds)
-            });
-            await history_execute_command(cmd, false);
-            
-            if (history_validate_compact()) {
-                main_init_compact();
-            }
-            console.log('钢笔效果下橡皮擦切割了', splitResults.length, '个笔画');
-        } else {
-            console.log('橡皮擦未擦除到钢笔笔画，不记录撤销步骤');
-        }
-        return;
-    }
-    
-    // 钢笔效果 OFF 或存在 baseImage：使用现有 destination-out 方案
-    const hasIntersection = main_validate_eraser_intersection(eraserStroke);
-    
-    if (hasIntersection) {
-        const eraserBounds = eraserStroke && eraserStroke.bounds ? { ...eraserStroke.bounds } : null;
-        const cmd = new EraseCommand({
-            stroke: eraserStroke,
-            strokeHistoryRef: state.strokeHistory,
-            redrawFn: () => main_render_all_strokes(eraserBounds)
-        });
-        await history_execute_command(cmd, false);
-        console.log('橡皮擦擦除了内容，记录撤销步骤');
-    } else {
-        console.log('橡皮擦未擦除到内容，不记录撤销步骤');
-    }
-}
-
-/**
- * 检测橡皮擦是否与现有笔画相交
- */
-function main_validate_eraser_intersection(eraserStroke) {
-    // 如果有 baseImage（包括加载中的），橡皮擦一定能擦除到内容
-    if (state.baseImageObj || state.baseImageURL) {
-        return true;
-    }
-    
-    if (state.strokeHistory.length === 0) {
-        return false; // 没有任何笔画，肯定不相交
-    }
-    
-    const eraserPoints = eraserStroke.points;
-    if (!eraserPoints || eraserPoints.length === 0) {
-        return false;
-    }
-    
-    const eraserSize = main_get_eraser_linewidth(eraserStroke);
-    const eraserRadius = eraserSize / 2;
-    
-    // 遍历所有现有笔画（不包括橡皮擦笔画）
-    for (const stroke of state.strokeHistory) {
-        if (stroke.type === 'erase') {
-            continue; // 跳过橡皮擦笔画
-        }
-        
-        const points = stroke.points;
-        if (!points || points.length === 0) {
-            continue;
-        }
-        
-            // 检查橡皮擦路径每个端点是否命中笔画（同时检查 from 和 to，快速移动时长线段可能跳过 from 点）
-            for (const eraserPoint of eraserPoints) {
-                let ex = eraserPoint.fromX;
-                let ey = eraserPoint.fromY;
-                
-                for (const point of points) {
-                    if (main_calc_eraser_point_hit_stroke(ex, ey, point, stroke.lineWidth, eraserRadius)) {
-                        return true;
-                    }
-                }
-                
-                ex = eraserPoint.toX;
-                ey = eraserPoint.toY;
-                
-                for (const point of points) {
-                    if (main_calc_eraser_point_hit_stroke(ex, ey, point, stroke.lineWidth, eraserRadius)) {
-                        return true;
-                    }
-                }
-            }
-        }
-    
-    return false; // 没有检测到相交
-}
-
-function main_calc_eraser_point_hit_stroke(px, py, strokePoint, strokeLineWidth, eraserRadius) {
-    const x1 = strokePoint.fromX;
-    const y1 = strokePoint.fromY;
-    const x2 = strokePoint.toX;
-    const y2 = strokePoint.toY;
-    
-    const distance = main_calc_point_segment_distance(px, py, x1, y1, x2, y2);
-    const strokeWidth = (strokeLineWidth || DRAW_CONFIG.penWidth) / 2;
-    const maxDistance = eraserRadius + strokeWidth;
-    
-    return distance <= maxDistance;
-}
-
-/**
- * 计算点到线段的最短距离
- */
-function main_calc_point_segment_distance(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    
-    if (dx === 0 && dy === 0) {
-        // 线段退化为点
-        return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
-    }
-    
-    // 计算投影参数 t
-    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
-    
-    // 计算投影点
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    
-    // 返回距离
-    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
-}
-
-function main_calc_stroke_bounds(points) {
-    const bounds = {
-        minX: Infinity, minY: Infinity,
-        maxX: -Infinity, maxY: -Infinity
-    };
-    for (const pt of points) {
-        if (pt.fromX < bounds.minX) bounds.minX = pt.fromX;
-        if (pt.toX < bounds.minX) bounds.minX = pt.toX;
-        if (pt.fromY < bounds.minY) bounds.minY = pt.fromY;
-        if (pt.toY < bounds.minY) bounds.minY = pt.toY;
-        if (pt.fromX > bounds.maxX) bounds.maxX = pt.fromX;
-        if (pt.toX > bounds.maxX) bounds.maxX = pt.toX;
-        if (pt.fromY > bounds.maxY) bounds.maxY = pt.fromY;
-        if (pt.toY > bounds.maxY) bounds.maxY = pt.toY;
-    }
-    return bounds;
-}
-
-function main_calc_split_strokes_by_eraser(drawStroke, eraserStroke, penEffectMode) {
-    const eraserSize = main_get_eraser_linewidth(eraserStroke);
-    const eraserRadius = eraserSize / 2;
-    const points = drawStroke.points;
-    if (!points || points.length === 0) return null;
-    if (!eraserStroke.points || eraserStroke.points.length === 0) return null;
-    
-    // 钢笔效果下实际渲染宽度 ≈ lineWidth + 5（tessellator 的基础增量）
-    // 用此作为保守的检测宽度，避免因滤波/平滑导致的 segment 索引偏移
-    const effectiveWidth = (penEffectMode && penEffectMode !== 'off')
-        ? (drawStroke.lineWidth || DRAW_CONFIG.penWidth) + 5
-        : (drawStroke.lineWidth || DRAW_CONFIG.penWidth);
-    
-    // 遍历每个原始 segment，检测擦除交集
-    const segmentErased = new Array(points.length).fill(false);
-    let anyErased = false;
-    
-    for (let i = 0; i < points.length; i++) {
-        const pt = points[i];
-        
-        for (const eraserPoint of eraserStroke.points) {
-            if (main_calc_eraser_point_hit_stroke(
-                eraserPoint.fromX, eraserPoint.fromY, pt, effectiveWidth, eraserRadius
-            )) {
-                segmentErased[i] = true;
-                anyErased = true;
-                break;
-            }
-            if (main_calc_eraser_point_hit_stroke(
-                eraserPoint.toX, eraserPoint.toY, pt, effectiveWidth, eraserRadius
-            )) {
-                segmentErased[i] = true;
-                anyErased = true;
-                break;
-            }
-        }
-    }
-    
-    if (!anyErased) return null;
-    
-    // 分组连续未擦除的 segments 为子笔画
-    const subPointsList = [];
-    let currentBatch = [];
-    
-    for (let i = 0; i < points.length; i++) {
-        if (!segmentErased[i]) {
-            currentBatch.push(points[i]);
-        } else {
-            if (currentBatch.length > 0) {
-                subPointsList.push(currentBatch);
-                currentBatch = [];
-            }
-        }
-    }
-    if (currentBatch.length > 0) {
-        subPointsList.push(currentBatch);
-    }
-    
-    // 过滤掉点数不足的子笔画（tessellator 至少需要 2 个点）
-    const validBatches = subPointsList.filter(pts => pts.length >= 2);
-    if (validBatches.length <= 1) return null;
-    
-    // 创建子笔画对象
-    const subStrokes = validBatches.map((pts, index) => {
-        const isFirst = index === 0;
-        const isLast = index === validBatches.length - 1;
-        
-        return {
-            type: 'draw',
-            points: pts,
-            color: drawStroke.color,
-            lineWidth: drawStroke.lineWidth,
-            scale: drawStroke.scale,
-            bounds: main_calc_stroke_bounds(pts),
-            noStartTaper: !isFirst,
-            storedWidths: drawStroke.storedWidths
-                ? drawStroke.storedWidths.slice(
-                    drawStroke.points.indexOf(pts[0]),
-                    drawStroke.points.indexOf(pts[0]) + pts.length
-                  )
-                : undefined
-        };
-    });
-    
-    return {
-        originalStroke: drawStroke,
-        subStrokes
-    };
 }
 
 async function main_render_all_strokes(bounds) {
@@ -3076,55 +2798,6 @@ async function main_render_all_strokes(bounds) {
     }
 
     tr.rebuild_all();
-}
-
-function main_get_eraser_linewidth(stroke) {
-    if (stroke.eraserSizeRaw != null) {
-        return stroke.eraserSizeRaw / main_fetch_safe_scale();
-    }
-    return stroke.eraserSize || DRAW_CONFIG.eraserSize;
-}
-
-async function main_render_eraser_stroke(stroke) {
-    if (!stroke.points || stroke.points.length < 1) return;
-    
-    const tr = window.tileRenderer;
-    if (!tr) return;
-    
-    const lineWidth = main_get_eraser_linewidth(stroke);
-    const pts = stroke.points;
-    const minX = Math.min(pts[0].fromX, pts[pts.length - 1].toX);
-    const minY = Math.min(pts[0].fromY, pts[pts.length - 1].toY);
-    const maxX = Math.max(pts[0].fromX, pts[pts.length - 1].toX);
-    const maxY = Math.max(pts[0].fromY, pts[pts.length - 1].toY);
-    
-    const infos = tr.infos_for_segment(minX, minY, maxX, maxY);
-    
-    const path = new Path2D();
-    path.moveTo(pts[0].fromX, pts[0].fromY);
-    path.lineTo(pts[0].toX, pts[0].toY);
-    for (let i = 1; i < pts.length; i++) {
-        path.lineTo(pts[i].fromX, pts[i].fromY);
-        path.lineTo(pts[i].toX, pts[i].toY);
-    }
-    
-    for (const info of infos) {
-        const ctx = info.ctx;
-        const dpr = info.dpr;
-        ctx.save();
-        ctx.setTransform(dpr, 0, 0, dpr,
-            -info.rect.x * dpr, -info.rect.y * dpr);
-        ctx.beginPath();
-        ctx.rect(info.rect.x, info.rect.y, info.rect.width, info.rect.height);
-        ctx.clip();
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
-        ctx.lineWidth = lineWidth;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.stroke(path);
-        ctx.restore();
-    }
 }
 
 function get_pen_effect_mode() {
@@ -3191,77 +2864,68 @@ function main_update_context_state(ctx, state) {
 window.main_update_context_state = main_update_context_state;
 
 /**
- * 按原始顺序逐个绘制笔画（橡皮擦 destination-out 必须在正确时机执行）
+ * 按原始顺序逐个绘制笔画：draw/comment 用 source-over，erase 用 destination-out
  * @param {CanvasRenderingContext2D} ctx
  * @param {Array} strokes - 笔画数组
  */
 async function main_render_strokes_to_context(ctx, strokes) {
     if (strokes.length === 0) return;
-    
+
     main_reset_context_state();
-    
+
     main_update_context_state(ctx, {
         lineCap: 'round',
         lineJoin: 'round'
     });
-    
+
     const pen_effect = get_pen_effect_mode();
-    
+
     for (const stroke of strokes) {
         if (!stroke.points || stroke.points.length < 1) continue;
-        
+
         if (stroke.type === 'erase') {
             main_update_context_state(ctx, {
                 globalCompositeOperation: 'destination-out',
-                strokeStyle: 'rgba(0, 0, 0, 1)',
-                lineWidth: main_get_eraser_linewidth(stroke)
+                strokeStyle: '#000000',
+                lineWidth: stroke.lineWidth || DRAW_CONFIG.eraserSize
             });
-            
-            const path = new Path2D();
-            const firstPoint = stroke.points[0];
-            path.moveTo(firstPoint.fromX, firstPoint.fromY);
-            path.lineTo(firstPoint.toX, firstPoint.toY);
-            for (let i = 1; i < stroke.points.length; i++) {
-                path.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
-                path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
-            }
-            ctx.stroke(path);
         } else {
             main_update_context_state(ctx, {
                 globalCompositeOperation: 'source-over'
             });
-            
-            if (pen_effect !== 'off') {
+
+            if (pen_effect !== 'off' && stroke.type === 'draw') {
                 const tessellated = realPenManager.build_tessellated_stroke(stroke, pen_effect);
                 if (tessellated) {
                     realPenManager.render_tessellated_stroke(ctx, tessellated);
                     continue;
                 }
             }
-            
+
             main_update_context_state(ctx, {
                 strokeStyle: stroke.color || DRAW_CONFIG.penColor,
                 lineWidth: stroke.lineWidth || DRAW_CONFIG.penWidth
             });
-            
-            const path = new Path2D();
-            const firstPoint = stroke.points[0];
-            path.moveTo(firstPoint.fromX, firstPoint.fromY);
-            path.lineTo(firstPoint.toX, firstPoint.toY);
-            for (let i = 1; i < stroke.points.length; i++) {
-                path.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
-                path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
-            }
-            ctx.stroke(path);
         }
+
+        const path = new Path2D();
+        const firstPoint = stroke.points[0];
+        path.moveTo(firstPoint.fromX, firstPoint.fromY);
+        path.lineTo(firstPoint.toX, firstPoint.toY);
+        for (let i = 1; i < stroke.points.length; i++) {
+            path.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
+            path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
+        }
+        ctx.stroke(path);
     }
-    
+
     main_update_context_state(ctx, {
         globalCompositeOperation: 'source-over'
     });
 }
 
 function main_init_compact() {
+    if (window.__HISTORY_ISOLATED) return;
     if (!history_validate_compact()) return;
     if (compactIdleId !== null) return;
     
@@ -3279,6 +2943,7 @@ function main_init_compact() {
 }
 
 async function main_handle_compact_strokes() {
+    if (window.__HISTORY_ISOLATED) return;
     if (!history_validate_compact()) return;
     
     const undoStack = history_fetch_undo_stack();
@@ -5594,7 +5259,6 @@ window.main_wait_pdfjs = main_wait_pdfjs;
 window.main_hide_pen_control_panel = main_hide_pen_control_panel;
 window.main_hide_settings_panel = main_hide_settings_panel;
 window.main_render_image_centered = main_render_image_centered;
-window.main_handle_eraser_stroke = main_handle_eraser_stroke;
 window.main_render_all_strokes = main_render_all_strokes;
 window.main_reset_context_state = main_reset_context_state;
 window.main_fetch_visible_rect = main_fetch_visible_rect;

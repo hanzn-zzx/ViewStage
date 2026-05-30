@@ -10,6 +10,7 @@ import {
     history_init_manager,
     history_validate_undo,
     history_handle_undo,
+    history_handle_state_change,
     DrawCommand,
     ClearCommand,
     history_state
@@ -70,6 +71,11 @@ class BlackboardManager {
         this.screen_w = 0;
         this.screen_h = 0;
         this.saved_history_state = null;
+        this._last_loaded_index = -1;
+
+        this._eraser_hint = null;
+        this._eraser_hint_raf_id = null;
+        this._eraser_hint_pending_pos = null;
     }
 
     _fetch_safe_scale() {
@@ -246,6 +252,13 @@ class BlackboardManager {
         this.overlay_ctx = this.overlay_canvas.getContext('2d');
         this.overlay_ctx.imageSmoothingEnabled = false;
 
+        // 橡皮擦红色范围提示
+        this._eraser_hint = document.createElement('div');
+        this._eraser_hint.className = 'eraser-hint';
+        this._eraser_hint.style.width = window.DRAW_CONFIG.eraserSize + 'px';
+        this._eraser_hint.style.height = window.DRAW_CONFIG.eraserSize + 'px';
+        canvas_wrap.appendChild(this._eraser_hint);
+
         // batch_draw 使用覆盖层
         this.batch_draw = new window.RealtimeBatchDrawManager();
         this.batch_draw._overlayCanvas = this.overlay_canvas;
@@ -325,9 +338,11 @@ class BlackboardManager {
             window.main_update_mode('move');
         }
 
+        window.__HISTORY_ISOLATED = true;
+
         this.saved_history_state = {
-            undo_list: history_state.undo_list,
-            redo_list: history_state.redo_list,
+            undo_list: [...history_state.undo_list],
+            redo_list: [...history_state.redo_list],
             on_state_change: history_state.on_state_change
         };
 
@@ -348,6 +363,7 @@ class BlackboardManager {
             await window.main_update_mode('comment');
         }
 
+        this._last_loaded_index = -1;
         await this._load_page_strokes(this.page_manager.current_index);
         this._update_page_indicator();
         this._update_button_status();
@@ -356,6 +372,7 @@ class BlackboardManager {
     async close() {
         if (!this.is_open) return;
         this.is_open = false;
+        window.__HISTORY_ISOLATED = false;
 
         if (this._animate_timer_id !== null) {
             clearTimeout(this._animate_timer_id);
@@ -366,15 +383,22 @@ class BlackboardManager {
         }
 
         await this._submit_stroke();
+        this._hide_eraser_hint();
+
+        // 关闭前保存当前页的 undo/redo 和 tile 快照
+        const cur_page = this.page_manager.get_current_page();
+        if (cur_page) {
+            cur_page.undo_list = history_state.undo_list;
+            cur_page.redo_list = history_state.redo_list;
+            if (this.tile_renderer) this._save_page_tile_snapshots(cur_page);
+        }
 
         if (this.saved_history_state) {
             history_state.undo_list = this.saved_history_state.undo_list;
             history_state.redo_list = this.saved_history_state.redo_list;
             history_state.on_state_change = this.saved_history_state.on_state_change;
             this.saved_history_state = null;
-            if (history_state.on_state_change) {
-                history_state.on_state_change();
-            }
+            history_handle_state_change();
         }
 
         const dom = window.dom;
@@ -535,6 +559,10 @@ class BlackboardManager {
 
         this.current_pressure = e.pressure || 0.5;
 
+        if (this.draw_mode === 'eraser') {
+            this._update_eraser_hint_position(e.clientX, e.clientY);
+        }
+
         const s = this.bb_state;
         if (s.is_dragging) {
             s.canvas_x = e.clientX - s.start_drag_x;
@@ -584,6 +612,48 @@ class BlackboardManager {
         await this._submit_stroke();
     }
 
+    // ====== 黑板橡皮擦范围提示 ======
+
+    _show_eraser_hint() {
+        if (!this._eraser_hint) return;
+        this._eraser_hint.classList.add('active');
+    }
+
+    _hide_eraser_hint() {
+        if (!this._eraser_hint) return;
+        this._eraser_hint.classList.remove('active');
+        if (this._eraser_hint_raf_id !== null) {
+            cancelAnimationFrame(this._eraser_hint_raf_id);
+            this._eraser_hint_raf_id = null;
+        }
+        this._eraser_hint_pending_pos = null;
+    }
+
+    _update_eraser_hint_position(clientX, clientY) {
+        if (!this._eraser_hint) return;
+        this._eraser_hint_pending_pos = { clientX, clientY };
+        if (this._eraser_hint_raf_id !== null) return;
+
+        this._eraser_hint_raf_id = requestAnimationFrame(() => {
+            this._eraser_hint_raf_id = null;
+            if (!this._eraser_hint_pending_pos) return;
+
+            const { clientX, clientY } = this._eraser_hint_pending_pos;
+            this._eraser_hint_pending_pos = null;
+
+            const rect = this.bb_wrapper
+                ? this.bb_wrapper.parentElement.getBoundingClientRect()
+                : null;
+            if (!rect) return;
+
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            this._eraser_hint.style.left = `${x}px`;
+            this._eraser_hint.style.top = `${y}px`;
+            this._eraser_hint.style.transform = 'translate(-50%, -50%)';
+        });
+    }
+
     // ====== 鼠标事件 (MouseEvent) — 无 PointerEvent 时的回退 ======
 
     _handle_mouse_down(e) {
@@ -614,6 +684,10 @@ class BlackboardManager {
 
     _handle_mouse_move(e) {
         e.preventDefault();
+
+        if (this.draw_mode === 'eraser') {
+            this._update_eraser_hint_position(e.clientX, e.clientY);
+        }
 
         const s = this.bb_state;
         if (s.is_dragging) {
@@ -735,6 +809,11 @@ class BlackboardManager {
         e.preventDefault();
         const touches = e.touches;
 
+        if (this.draw_mode === 'eraser' && touches.length > 0) {
+            const touch = touches[0];
+            this._update_eraser_hint_position(touch.clientX, touch.clientY);
+        }
+
         const s = this.bb_state;
 
         if (window.PointerEvent && touches.length === 1) { return; }
@@ -825,6 +904,29 @@ class BlackboardManager {
 
     // ====== 笔画生命周期 — 复制自 main.js ======
 
+    _save_tile_snapshots() {
+        const tr = this.tile_renderer;
+        if (!tr) return null;
+        return tr.tileInfos.map(info => {
+            const w = info.canvas.width;
+            const h = info.canvas.height;
+            return info.ctx.getImageData(0, 0, w, h);
+        });
+    }
+
+    _restore_tile_snapshots(snapshots) {
+        const tr = this.tile_renderer;
+        if (!tr || !snapshots) return false;
+        for (let i = 0; i < tr.tileInfos.length; i++) {
+            const info = tr.tileInfos[i];
+            const snap = snapshots[i];
+            if (snap && info.canvas && snap.width === info.canvas.width && snap.height === info.canvas.height) {
+                info.ctx.putImageData(snap, 0, 0);
+            }
+        }
+        return true;
+    }
+
     _start_stroke(type) {
         const DRAW_CONFIG = window.DRAW_CONFIG;
         const inv_scale = 1 / this._fetch_safe_scale();
@@ -888,43 +990,22 @@ class BlackboardManager {
 
             const page = this.page_manager.get_current_page();
             if (page) {
-                if (this.current_stroke.type === 'erase') {
-                    await this._handle_eraser_stroke(this.current_stroke, page);
-                } else {
-                    const stroke_bounds = this.current_stroke && this.current_stroke.bounds ? { ...this.current_stroke.bounds } : null;
-                    const cmd = new DrawCommand({
-                        stroke: this.current_stroke,
-                        strokeHistoryRef: page.stroke_history,
-                        redrawFn: () => this._render_all_strokes(stroke_bounds)
-                    });
-                    await history_execute_command(cmd, false);
-                    await this._render_all_strokes(stroke_bounds);
-                }
+                const stroke_bounds = this.current_stroke && this.current_stroke.bounds
+                    ? { ...this.current_stroke.bounds } : null;
+                const cmd = new DrawCommand({
+                    stroke: this.current_stroke,
+                    strokeHistoryRef: page.stroke_history,
+                    redrawFn: () => this._render_all_strokes(stroke_bounds)
+                });
+                await history_execute_command(cmd, false);
+                await this._render_all_strokes(stroke_bounds);
             }
         }
 
         this.current_stroke = null;
-
         await this.batch_draw.batch_draw_handle_end();
-
         this.batch_draw.batch_draw_delete_all();
-
         this._update_button_status();
-    }
-
-    // ====== 橡皮擦逻辑 — 复制自 main.js ======
-
-    async _handle_eraser_stroke(eraser_stroke, page) {
-        const orig_history = window.state.strokeHistory;
-        const orig_scale = window.state.scale;
-        window.state.strokeHistory = page.stroke_history;
-        window.state.scale = this.bb_state.scale;
-        try {
-            await window.main_handle_eraser_stroke(eraser_stroke);
-        } finally {
-            window.state.strokeHistory = orig_history;
-            window.state.scale = orig_scale;
-        }
     }
 
     // ====== 渲染 — 使用主渲染管线 ======
@@ -934,8 +1015,6 @@ class BlackboardManager {
         if (!page) return;
 
         if (this.tile_renderer) {
-            // 交换 state.scale，确保 main_render_strokes_to_context 内的
-            // main_get_eraser_linewidth 使用黑板缩放而非主视图缩放
             const orig_scale = window.state.scale;
             window.state.scale = this.bb_state.scale;
 
@@ -943,52 +1022,84 @@ class BlackboardManager {
             this.tile_renderer._strokeHistoryRef = page.stroke_history;
             this.tile_renderer.mark_strokes_changed();
 
-            try {
-                if (bounds && isFinite(bounds.minX) && isFinite(bounds.minY) &&
-                              isFinite(bounds.maxX) && isFinite(bounds.maxY)) {
-                    const infos = this.tile_renderer.infos_for_segment(
-                        bounds.minX, bounds.minY,
-                        bounds.maxX, bounds.maxY
-                    );
-                    for (const info of infos) {
-                        this.tile_renderer.dirty.add(info.key);
-                    }
-                } else {
-                    this.tile_renderer.mark_all();
+            if (bounds && isFinite(bounds.minX) && isFinite(bounds.minY) &&
+                          isFinite(bounds.maxX) && isFinite(bounds.maxY)) {
+                const infos = this.tile_renderer.infos_for_segment(
+                    bounds.minX, bounds.minY,
+                    bounds.maxX, bounds.maxY
+                );
+                for (const info of infos) {
+                    this.tile_renderer.dirty.add(info.key);
                 }
+            } else {
+                this.tile_renderer.mark_all();
+            }
 
+            try {
                 this.tile_renderer.rebuild_all();
             } finally {
                 window.state.scale = orig_scale;
             }
+        }
+        page.snapshot_dirty = true;
+    }
+
+    _save_page_tile_snapshots(page) {
+        const snapshots = this._save_tile_snapshots();
+        if (snapshots) {
+            page.tile_snapshots = snapshots;
+            page.snapshot_dirty = false;
+        }
+    }
+
+    _restore_page_tile_snapshots(page) {
+        return this._restore_tile_snapshots(page.tile_snapshots);
+    }
+
+    async _rebuild_from_history(page) {
+        if (!this.tile_renderer) return;
+
+        const orig_scale = window.state.scale;
+        window.state.scale = this.bb_state.scale;
+
+        window.main_reset_context_state();
+        this.tile_renderer._strokeHistoryRef = page.stroke_history;
+        this.tile_renderer.mark_strokes_changed();
+        this.tile_renderer.mark_all();
+
+        try {
+            this.tile_renderer.rebuild_all();
+        } finally {
+            window.state.scale = orig_scale;
         }
     }
 
     async _load_page_strokes(index) {
+        // 保存当前页的 undo/redo 和历史和 tile 快照
+        if (this._last_loaded_index >= 0 && this._last_loaded_index < this.page_manager.pages_list.length) {
+            const prev_page = this.page_manager.pages_list[this._last_loaded_index];
+            prev_page.undo_list = history_state.undo_list;
+            prev_page.redo_list = history_state.redo_list;
+            this._save_page_tile_snapshots(prev_page);
+        }
+        this._last_loaded_index = index;
+
         const page = this.page_manager.pages_list[index];
         if (!page) return;
 
-        if (this.tile_renderer) {
-            const orig_scale = window.state.scale;
-            window.state.scale = this.bb_state.scale;
+        // 恢复目标页的 undo/redo 历史
+        history_state.undo_list = page.undo_list || [];
+        history_state.redo_list = page.redo_list || [];
+        history_state.is_executing = false;
 
-            window.main_reset_context_state();
-            this.tile_renderer._strokeHistoryRef = page.stroke_history;
-            this.tile_renderer.mark_strokes_changed();
-            this.tile_renderer.mark_all();
-
-            try {
-                this.tile_renderer.rebuild_all();
-            } finally {
-                window.state.scale = orig_scale;
-            }
+        // 优先从 tile 快照恢复（像素级精确，保留 batch draw 的擦除效果）
+        // 没有快照或标记脏时从 stroke_history 重建
+        if (page.snapshot_dirty || !page.tile_snapshots) {
+            await this._rebuild_from_history(page);
+            this._save_page_tile_snapshots(page);
+        } else {
+            this._restore_page_tile_snapshots(page);
         }
-
-        history_init_manager({
-            on_state_change: () => {
-                this._update_button_status();
-            }
-        });
         this._update_button_status();
     }
 
@@ -1109,10 +1220,12 @@ class BlackboardManager {
         this._sync_bb_transform();
 
         if (this.tile_renderer) {
+            const page = this.page_manager.get_current_page();
             const orig_scale = window.state.scale;
             window.state.scale = this.bb_state.scale;
 
             window.main_reset_context_state();
+            if (page) this.tile_renderer._strokeHistoryRef = page.stroke_history;
             this.tile_renderer.mark_all();
 
             try {
@@ -1125,6 +1238,8 @@ class BlackboardManager {
 
     async destroy() {
         await this._submit_stroke();
+        window.__HISTORY_ISOLATED = false;
+        this._last_loaded_index = -1;
         this.page_manager.destroy();
 
         if (this.batch_draw) {
