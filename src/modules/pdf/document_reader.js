@@ -364,7 +364,13 @@ class DocumentReaderManager {
             this._set_page_box_size(page_data, base_w);
             page_div.style.touchAction = 'none';
 
-            if (page_data.loaded || page_data.image_url) {
+            if (page_data.render_mode === 'pdfjs') {
+                this._create_pdf_page_layers(page_data);
+
+                const tiles_container = document.createElement('div');
+                tiles_container.className = 'doc-reader-page-tiles';
+                page_div.appendChild(tiles_container);
+            } else if (page_data.loaded || page_data.image_url) {
                 // 图片层（懒加载：data-src 替代 src）
                 const img = document.createElement('img');
                 img.alt = `第 ${page_data.page_num} 页`;
@@ -484,6 +490,15 @@ class DocumentReaderManager {
             this._page_visible_timeout_id = null;
         }
 
+        if (page_data.render_mode === 'pdfjs') {
+            this._render_pdf_page_direct(page_index);
+            if (!page_data.is_tiles_initialized) {
+                this._init_page_tiles(page_index);
+                this._update_overlay_size(page_index);
+            }
+            return;
+        }
+
         // 懒加载图片
         const img = page_data.page_element?.querySelector('img');
         const has_img_src = img?.hasAttribute('src') && img.getAttribute('src');
@@ -552,6 +567,10 @@ class DocumentReaderManager {
     async _load_pdf_page(page_index) {
         const page_data = this.page_manager.pages_list[page_index];
         if (!page_data || page_data.loaded) return;
+        if (page_data.render_mode === 'pdfjs') {
+            page_data.loaded = true;
+            return this._render_pdf_page_direct(page_index);
+        }
         if (page_data.loading_promise) return page_data.loading_promise;
 
         const folder = window.state.fileList[this.folder_index];
@@ -561,14 +580,17 @@ class DocumentReaderManager {
             const page_num = page_data.page_num;
             const doc_number = folder.docNumber ?? null;
 
-            // 调用 document_loader 渲染页面
-            const { render_pdf_page } = await import('./document_loader.js');
-            const result = await render_pdf_page(folder.pdfDoc, page_num, doc_number);
+            const { get_pdf_page_info } = await import('./document_loader.js');
+            const result = await get_pdf_page_info(folder.pdfDoc, page_num, doc_number);
 
             // 更新页面数据
-            page_data.image_url = result.full;
-            page_data.thumbnail_url = result.full;
+            page_data.image_url = null;
+            page_data.thumbnail_url = null;
+            page_data.render_mode = 'pdfjs';
             page_data.loaded = true;
+            page_data.page_width = result.width;
+            page_data.page_height = result.height;
+            this._refresh_page_aspect(page_data);
 
             // 移除占位符
             const placeholder = page_data.page_element?.querySelector('.doc-reader-page-placeholder:not(.doc-reader-page-virtual-placeholder)');
@@ -576,38 +598,26 @@ class DocumentReaderManager {
                 placeholder.remove();
             }
 
-            // 更新图片
-            const img = page_data.page_element?.querySelector('img');
-            if (img) {
-                img.dataset.src = result.full;
-                if (page_data.is_visible) {
-                    img.src = result.full;
-                    img.onload = () => {
-                        page_data.page_width = img.naturalWidth || img.clientWidth;
-                        page_data.page_height = img.naturalHeight || img.clientHeight;
-                        this._refresh_page_aspect(page_data);
-                        this._resize_page_layout(page_index, this._get_page_base_width());
-                        this._init_page_tiles(page_index);
-                        this._update_overlay_size(page_index);
-                    };
-                }
+            page_data.page_element?.querySelector('img')?.remove();
+            this._create_pdf_page_layers(page_data);
+            if (!page_data.page_element?.querySelector('.doc-reader-page-tiles')) {
+                const tiles_container = document.createElement('div');
+                tiles_container.className = 'doc-reader-page-tiles';
+                page_data.page_element?.appendChild(tiles_container);
             }
+            this._resize_page_layout(page_index, this._get_page_base_width());
 
             // 更新侧边栏中的页面数据
             if (folder.pages[page_index]) {
-                if (folder.pages[page_index].thumbnail &&
-                    folder.pages[page_index].thumbnail !== folder.pages[page_index].full &&
-                    folder.pages[page_index].thumbnail.startsWith('blob:')) {
-                    URL.revokeObjectURL(folder.pages[page_index].thumbnail);
-                }
-                folder.pages[page_index].full = result.full;
-                folder.pages[page_index].thumbnail = result.full;
+                folder.pages[page_index].full = null;
+                folder.pages[page_index].thumbnail = null;
                 folder.pages[page_index].loaded = true;
                 folder.pages[page_index].width = result.width;
                 folder.pages[page_index].height = result.height;
+                folder.pages[page_index].renderMode = 'pdfjs';
             }
 
-            this._update_page_sidebar_thumbnail(page_index, result.full);
+            await this._render_pdf_page_direct(page_index);
         })();
 
         try {
@@ -657,6 +667,19 @@ class DocumentReaderManager {
 
         page_el.querySelectorAll('.doc-reader-page-virtual-placeholder').forEach(el => el.remove());
 
+        if (page_data.render_mode === 'pdfjs') {
+            if (!page_el.querySelector('.doc-reader-pdf-canvas')) {
+                this._create_pdf_page_layers(page_data);
+            }
+            if (!page_el.querySelector('.doc-reader-page-tiles')) {
+                const tiles_container = document.createElement('div');
+                tiles_container.className = 'doc-reader-page-tiles';
+                page_el.appendChild(tiles_container);
+            }
+            this._set_page_box_size(page_data, page_data.coord_width || this._get_page_base_width());
+            return;
+        }
+
         let img = page_el.querySelector('img');
         if (!img) {
             img = document.createElement('img');
@@ -694,7 +717,11 @@ class DocumentReaderManager {
         if (!page_el || page_data.is_virtualized || page_data.is_visible) return;
 
         this._destroy_page_tiles(page_index);
-        this._release_page_image(page_index);
+        if (page_data.render_mode === 'pdfjs') {
+            this._release_pdf_page_render(page_index);
+        } else {
+            this._release_page_image(page_index);
+        }
 
         const placeholder = document.createElement('div');
         placeholder.className = 'doc-reader-page-placeholder doc-reader-page-virtual-placeholder';
@@ -715,9 +742,137 @@ class DocumentReaderManager {
         // blob URL 保留在 dataset.src，页面再次可见时复用；移除 src 后浏览器可回收解码纹理。
     }
 
+    _create_pdf_page_layers(page_data) {
+        const page_el = page_data?.page_element;
+        if (!page_el) return;
+
+        if (!page_el.querySelector('.doc-reader-pdf-canvas')) {
+            const canvas = document.createElement('canvas');
+            canvas.className = 'doc-reader-pdf-canvas';
+            canvas.setAttribute('aria-label', `第 ${page_data.page_num} 页`);
+            page_el.appendChild(canvas);
+            page_data.pdf_canvas = canvas;
+        } else {
+            page_data.pdf_canvas = page_el.querySelector('.doc-reader-pdf-canvas');
+        }
+
+        if (!page_el.querySelector('.doc-reader-text-layer')) {
+            const text_layer = document.createElement('div');
+            text_layer.className = 'doc-reader-text-layer';
+            page_el.appendChild(text_layer);
+            page_data.pdf_text_layer = text_layer;
+        } else {
+            page_data.pdf_text_layer = page_el.querySelector('.doc-reader-text-layer');
+        }
+    }
+
+    async _render_pdf_page_direct(page_index, force = false) {
+        const page_data = this.page_manager.pages_list[page_index];
+        if (!page_data || page_data.render_mode !== 'pdfjs') return;
+        if (page_data.pdf_render_promise && !force) return page_data.pdf_render_promise;
+
+        const folder = window.state.fileList[this.folder_index];
+        if (!folder?.pdfDoc || !page_data.page_element) return;
+
+        this._create_pdf_page_layers(page_data);
+        const css_w = Math.round(parseFloat(page_data.page_element.style.width)) || page_data.page_element.clientWidth || 800;
+        if (!force &&
+            page_data.pdf_render_css_width === css_w &&
+            page_data.pdf_canvas?.width > 0) {
+            return;
+        }
+
+        page_data.pdf_render_promise = (async () => {
+            if (force && page_data.pdf_render_task) {
+                page_data.pdf_render_task.cancel?.();
+                page_data.pdf_render_task = null;
+            }
+
+            const pdf_page = await folder.pdfDoc.getPage(page_data.page_num);
+            try {
+                const base_viewport = pdf_page.getViewport({ scale: 1 });
+                const css_scale = css_w / base_viewport.width;
+                const css_viewport = pdf_page.getViewport({ scale: css_scale });
+                const render_dpr = Math.min(window.devicePixelRatio || window.DRAW_CONFIG?.dpr || 1, 2);
+                const render_viewport = pdf_page.getViewport({ scale: css_scale * render_dpr });
+
+                page_data.page_width = base_viewport.width;
+                page_data.page_height = base_viewport.height;
+                this._refresh_page_aspect(page_data);
+
+                const canvas = page_data.pdf_canvas;
+                const text_layer = page_data.pdf_text_layer;
+                if (!canvas || !text_layer) return;
+
+                canvas.width = Math.ceil(render_viewport.width);
+                canvas.height = Math.ceil(render_viewport.height);
+                canvas.style.width = Math.ceil(css_viewport.width) + 'px';
+                canvas.style.height = Math.ceil(css_viewport.height) + 'px';
+
+                text_layer.replaceChildren();
+                text_layer.style.width = Math.ceil(css_viewport.width) + 'px';
+                text_layer.style.height = Math.ceil(css_viewport.height) + 'px';
+
+                const ctx = canvas.getContext('2d', { alpha: false });
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const render_task = pdf_page.render({
+                    canvasContext: ctx,
+                    viewport: render_viewport
+                });
+                page_data.pdf_render_task = render_task;
+                await render_task.promise;
+                page_data.pdf_render_task = null;
+
+                const text_content = await pdf_page.getTextContent();
+                const text_task = window.pdfjsLib.renderTextLayer({
+                    textContentSource: text_content,
+                    container: text_layer,
+                    viewport: css_viewport,
+                    enhanceTextSelection: true
+                });
+                await text_task.promise;
+                page_data.pdf_render_css_width = css_w;
+            } finally {
+                pdf_page.cleanup?.();
+            }
+        })();
+
+        try {
+            return await page_data.pdf_render_promise;
+        } catch (error) {
+            if (error?.name !== 'RenderingCancelledException') {
+                console.error(`直接渲染 PDF 页面 ${page_index + 1} 失败:`, error);
+            }
+        } finally {
+            page_data.pdf_render_promise = null;
+        }
+    }
+
+    _release_pdf_page_render(page_index) {
+        const page_data = this.page_manager.pages_list[page_index];
+        if (!page_data) return;
+
+        if (page_data.pdf_render_task) {
+            page_data.pdf_render_task.cancel?.();
+            page_data.pdf_render_task = null;
+        }
+        if (page_data.pdf_canvas) {
+            page_data.pdf_canvas.width = 0;
+            page_data.pdf_canvas.height = 0;
+        }
+        page_data.pdf_render_css_width = 0;
+        if (page_data.pdf_text_layer) {
+            page_data.pdf_text_layer.replaceChildren();
+        }
+    }
+
     _release_page_blob_url(page_index) {
         const page_data = this.page_manager.pages_list[page_index];
         if (!page_data || page_data.is_visible || page_index === this.active_page_index) return;
+        if (page_data.render_mode === 'pdfjs') return;
 
         const image_url = page_data.image_url;
         const thumbnail_url = page_data.thumbnail_url;
@@ -793,6 +948,16 @@ class DocumentReaderManager {
             img.style.height = '100%';
         }
 
+        if (page_data.pdf_canvas) {
+            page_data.pdf_canvas.style.width = '100%';
+            page_data.pdf_canvas.style.height = '100%';
+        }
+
+        if (page_data.pdf_text_layer) {
+            page_data.pdf_text_layer.style.width = safe_w + 'px';
+            page_data.pdf_text_layer.style.height = safe_h + 'px';
+        }
+
         const tiles_container = page_data.page_element.querySelector('.doc-reader-page-tiles');
         if (tiles_container) {
             tiles_container.style.width = safe_w + 'px';
@@ -848,6 +1013,9 @@ class DocumentReaderManager {
         if (page_data.is_tiles_initialized) {
             this._destroy_page_tiles(page_index);
             this._init_page_tiles(page_index);
+        }
+        if (page_data.render_mode === 'pdfjs' && page_data.is_visible) {
+            this._render_pdf_page_direct(page_index, true);
         }
         this._update_overlay_size(page_index);
     }
@@ -1704,6 +1872,14 @@ class DocumentReaderManager {
             img.alt = page_label;
             img.loading = 'lazy';
             thumb_el = img;
+        } else if (page.render_mode === 'pdfjs') {
+            const canvas = document.createElement('canvas');
+            canvas.className = 'dr-page-sidebar-thumb dr-page-sidebar-pdf-thumb is-loading';
+            canvas.dataset.page = index;
+            canvas.setAttribute('role', 'img');
+            canvas.setAttribute('aria-label', page_label);
+            thumb_el = canvas;
+            item.classList.add('loading');
         } else {
             thumb_el = document.createElement('div');
             thumb_el.className = 'dr-page-sidebar-thumb is-loading';
@@ -1808,6 +1984,21 @@ class DocumentReaderManager {
         const page = this.page_manager.pages_list[page_index];
         if (!page || !img) return;
 
+        if (page.render_mode === 'pdfjs') {
+            if (img.dataset.rendered === 'true') return;
+            if (page.sidebar_thumbnail_loading) return;
+
+            page.sidebar_thumbnail_loading = true;
+            try {
+                await this._render_page_sidebar_pdf_thumbnail(page_index, img);
+            } catch (error) {
+                console.error(`渲染 PDF 缩略图 ${page_index + 1} 失败:`, error);
+            } finally {
+                page.sidebar_thumbnail_loading = false;
+            }
+            return;
+        }
+
         const existing_src = page.image_url || page.thumbnail_url;
         if (existing_src) {
             this._set_sidebar_thumbnail_src(img, page_index, existing_src);
@@ -1826,6 +2017,49 @@ class DocumentReaderManager {
             console.error(`加载侧边栏原图 ${page_index + 1} 失败:`, error);
         } finally {
             page.sidebar_thumbnail_loading = false;
+        }
+    }
+
+    async _render_page_sidebar_pdf_thumbnail(page_index, canvas) {
+        const page = this.page_manager.pages_list[page_index];
+        const folder = window.state.fileList[this.folder_index];
+        if (!page || !folder?.pdfDoc || !canvas || canvas.tagName !== 'CANVAS') return;
+
+        const pdf_page = await folder.pdfDoc.getPage(page.page_num);
+        try {
+            const base_viewport = pdf_page.getViewport({ scale: 1 });
+            const css_w = Math.max(120, Math.round(canvas.clientWidth || canvas.closest('.dr-page-sidebar-item')?.clientWidth || 180));
+            const css_h = Math.round(css_w * 9 / 16);
+            const dpr = Math.min(window.devicePixelRatio || window.DRAW_CONFIG?.dpr || 1, 2);
+            const canvas_w = Math.ceil(css_w * dpr);
+            const canvas_h = Math.ceil(css_h * dpr);
+            const page_scale = Math.min(canvas_w / base_viewport.width, canvas_h / base_viewport.height);
+            const viewport = pdf_page.getViewport({ scale: page_scale });
+            const offset_x = Math.round((canvas_w - viewport.width) / 2);
+            const offset_y = Math.round((canvas_h - viewport.height) / 2);
+
+            canvas.width = canvas_w;
+            canvas.height = canvas_h;
+            canvas.style.width = '100%';
+            canvas.style.height = css_h + 'px';
+
+            const ctx = canvas.getContext('2d', { alpha: false });
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, canvas_w, canvas_h);
+
+            const task = pdf_page.render({
+                canvasContext: ctx,
+                viewport,
+                transform: [1, 0, 0, 1, offset_x, offset_y]
+            });
+            await task.promise;
+
+            canvas.dataset.rendered = 'true';
+            canvas.classList.remove('is-loading');
+            canvas.closest('.dr-page-sidebar-item')?.classList.remove('loading');
+        } finally {
+            pdf_page.cleanup?.();
         }
     }
 

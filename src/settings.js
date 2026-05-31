@@ -224,22 +224,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
                 
-                const pdfScaleSelected = document.getElementById('pdfScaleSelected');
-                const pdfScaleOptionsContainer = document.getElementById('pdfScaleOptions');
-                
-                if (pdfScaleSelected && pdfScaleOptionsContainer) {
-                    const savedPdfScale = settings.pdfScale || 2;
-                    const pdfScaleOptions = pdfScaleOptionsContainer.querySelectorAll('.select-option');
-                    pdfScaleOptions.forEach(option => {
-                        if (parseFloat(option.dataset.value) === savedPdfScale) {
-                            pdfScaleSelected.textContent = option.textContent;
-                            option.classList.add('selected');
-                        } else {
-                            option.classList.remove('selected');
-                        }
-                    });
-                }
-                
                 const dprLimitSelected = document.getElementById('dprLimitSelected');
                 const dprLimitOptionsContainer = document.getElementById('dprLimitOptions');
 
@@ -842,38 +826,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error('保存分辨率设置失败:', error);
                 settings_show_dialog(window.i18n?.format_translate('settings.saveFailed') || '保存失败', String(error), 'error');
             }
-        });
-    }
-    
-    // PDF 输出分辨率选择
-    const pdfScaleSelect = document.getElementById('pdfScaleSelect');
-    const pdfScaleSelected = document.getElementById('pdfScaleSelected');
-    
-    if (pdfScaleSelect && pdfScaleSelected) {
-        pdfScaleSelected.addEventListener('click', () => {
-            pdfScaleSelect.classList.toggle('open');
-        });
-        
-        document.addEventListener('click', (e) => {
-            if (!pdfScaleSelect.contains(e.target)) {
-                pdfScaleSelect.classList.remove('open');
-            }
-        });
-        
-        pdfScaleSelect.addEventListener('click', async (e) => {
-            const option = e.target.closest('.select-option');
-            if (!option) return;
-            
-            const value = parseFloat(option.dataset.value);
-            pdfScaleSelected.textContent = option.textContent;
-            
-            const pdfScaleOptions = pdfScaleSelect.querySelectorAll('.select-option');
-            pdfScaleOptions.forEach(opt => opt.classList.remove('selected'));
-            option.classList.add('selected');
-            
-            pdfScaleSelect.classList.remove('open');
-            
-            await settings_save_all_local({ pdfScale: value });
         });
     }
     

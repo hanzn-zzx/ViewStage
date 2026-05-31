@@ -56,7 +56,6 @@ const oobe_default_config = {
     defaultCamera: "",
     cameraWidth: 1280,
     cameraHeight: 720,
-    pdfScale: 2,
     penColors: [
         {"r": 239, "g": 68, "b": 68},
         {"r": 249, "g": 115, "b": 22},

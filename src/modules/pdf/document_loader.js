@@ -34,122 +34,50 @@ export async function wait_pdfjs(max_wait = 5000) {
 }
 
 /**
- * 渲染单个 PDF 页面为 JPEG blob URL
+ * 读取单个 PDF 页面的元数据，不把页面转成图片。
  * @param {Object} pdf - PDF.js document 对象
  * @param {number} page_num - 页码（1-based）
- * @param {number} doc_number - 文档编号（用于生成 sourceId）
- * @param {number} [scale] - 渲染缩放比例，默认取 DRAW_CONFIG.pdfScale
- * @param {number} [quality] - JPEG 输出质量
- * @returns {Promise<{full: string, thumbnail: string, pageNum: number, sourceId: string, loaded: boolean}>}
+ * @param {number|null} doc_number - 文档编号（用于生成 sourceId）
+ * @returns {Promise<{full: null, thumbnail: null, pageNum: number, sourceId: string|null, loaded: boolean, width: number, height: number, renderMode: string}>}
  */
-export async function render_pdf_page(pdf, page_num, doc_number, scale, quality = 0.85) {
-    const render_scale = scale || window.DRAW_CONFIG?.pdfScale || 2;
+export async function get_pdf_page_info(pdf, page_num, doc_number) {
     const page = await pdf.getPage(page_num);
-    const viewport = page.getViewport({ scale: render_scale });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
-
-    let full_blob;
-    try {
-        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-
-        full_blob = await new Promise((resolve, reject) => {
-            canvas.toBlob(blob => {
-                if (blob) resolve(blob);
-                else reject(new Error('Failed to create blob'));
-            }, 'image/jpeg', quality);
-        });
-    } finally {
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup?.();
-    }
-    const full_url = URL.createObjectURL(full_blob);
-
+    const viewport = page.getViewport({ scale: 1 });
     const source_id = doc_number !== null ? `doc-${doc_number}-${page_num}` : null;
+    page.cleanup?.();
 
     return {
-        full: full_url,
-        thumbnail: full_url,
+        full: null,
+        thumbnail: null,
         pageNum: page_num,
         sourceId: source_id,
         loaded: true,
         width: viewport.width,
-        height: viewport.height
+        height: viewport.height,
+        renderMode: 'pdfjs'
     };
 }
 
 /**
- * 懒加载渲染 PDF 页面：先渲染前 initialPages 页，其余创建占位对象
+ * 构建 PDF 页面列表：只读取页尺寸，页面内容在阅读器中按需直接渲染。
  * @param {Object} pdf - PDF.js document 对象
  * @param {number} total_pages - 总页数
- * @param {number} initial_pages - 立即渲染的页数
+ * @param {number} initial_pages - 保留旧调用签名，不再用于预渲染
  * @param {number|null} doc_number - 文档编号
  * @returns {Promise<Array>} 页面数据数组
  */
 export async function render_pdf_pages_lazy(pdf, total_pages, initial_pages = 3, doc_number = null) {
     const pages = [];
-    const pages_to_load = Math.min(initial_pages, total_pages);
 
-    for (let i = 1; i <= pages_to_load; i++) {
+    for (let i = 1; i <= total_pages; i++) {
         update_loading_progress(
             window.i18n?.format_translate('loading.processingPage', { current: i, total: total_pages })
             || `正在处理 ${i}/${total_pages} 页`
         );
-        const page_data = await render_pdf_page(pdf, i, doc_number);
+        const page_data = await get_pdf_page_info(pdf, i, doc_number);
         pages.push(page_data);
     }
 
-    for (let i = pages_to_load + 1; i <= total_pages; i++) {
-        const source_id = doc_number !== null ? `doc-${doc_number}-${i}` : null;
-        pages.push({
-            full: null,
-            thumbnail: null,
-            pageNum: i,
-            sourceId: source_id,
-            loaded: false
-        });
-    }
-
-    return pages;
-}
-
-/**
- * 并行批量渲染所有 PDF 页面
- * @param {Object} pdf - PDF.js document 对象
- * @param {number} total_pages - 总页数
- * @param {number} batch_size - 每批并行数
- * @param {number|null} doc_number - 文档编号
- * @returns {Promise<Array>} 页面数据数组（按页码排序）
- */
-export async function render_pdf_pages_parallel(pdf, total_pages, batch_size = 4, doc_number = null) {
-    const pages = [];
-    let processed_count = 0;
-
-    async function render_page(page_num) {
-        const page_data = await render_pdf_page(pdf, page_num, doc_number);
-        processed_count++;
-        update_loading_progress(
-            window.i18n?.format_translate('loading.processingPage', { current: processed_count, total: total_pages })
-            || `正在处理 ${processed_count}/${total_pages} 页`
-        );
-        return page_data;
-    }
-
-    for (let i = 1; i <= total_pages; i += batch_size) {
-        const batch = [];
-        for (let j = i; j <= Math.min(i + batch_size - 1, total_pages); j++) {
-            batch.push(render_page(j));
-        }
-        const batch_results = await Promise.all(batch);
-        pages.push(...batch_results);
-        await new Promise(resolve => setTimeout(resolve, 0));
-    }
-
-    pages.sort((a, b) => a.pageNum - b.pageNum);
     return pages;
 }
 
@@ -271,9 +199,8 @@ export function revoke_all_document_blob_urls() {
 export const DocLoader = {
     init_pdfjs,
     wait_pdfjs,
-    render_pdf_page,
+    get_pdf_page_info,
     render_pdf_pages_lazy,
-    render_pdf_pages_parallel,
     show_loading_overlay,
     update_loading_progress,
     hide_loading_overlay,

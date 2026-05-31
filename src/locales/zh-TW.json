@@ -102,7 +102,6 @@
     "restoreDefaults": "恢復預設",
     "defaultCamera": "預設攝影機",
     "cameraResolution": "攝影機解析度",
-    "pdfOutputResolution": "PDF 輸出解析度",
     "mirror": "畫面鏡像",
     "denoiseFrameCount": "降噪幀數",
     "denoiseStrength": "降噪強度",

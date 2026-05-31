@@ -195,10 +195,6 @@ async function settings_load_camera_config() {
                 DRAW_CONFIG.dprStep = settings.dprStep;
             }
 
-            if (settings.pdfScale) {
-                DRAW_CONFIG.pdfScale = settings.pdfScale;
-            }
-
             if (settings.penColors && Array.isArray(settings.penColors)) {
                 DRAW_CONFIG.penColors = settings.penColors.map(color => {
                     if (typeof color === 'object' && color.r !== undefined) {

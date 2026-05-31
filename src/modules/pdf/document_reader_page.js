@@ -21,6 +21,7 @@ export class DocumentReaderPageManager {
             redo_list: [],
             image_url: page_data.full,
             thumbnail_url: page_data.thumbnail || page_data.full,
+            render_mode: page_data.renderMode || 'image',
             page_num: page_data.pageNum,
             page_width: page_data.width || 0,
             page_height: page_data.height || 0,
@@ -34,6 +35,11 @@ export class DocumentReaderPageManager {
             loading_promise: null,
             overlay_canvas: null,
             overlay_ctx: null,
+            pdf_canvas: null,
+            pdf_render_css_width: 0,
+            pdf_render_promise: null,
+            pdf_render_task: null,
+            pdf_text_layer: null,
             page_element: null,
             index: index
         }));
@@ -76,8 +82,20 @@ export class DocumentReaderPageManager {
             if (page.overlay_canvas && page.overlay_canvas.parentNode) {
                 page.overlay_canvas.parentNode.removeChild(page.overlay_canvas);
             }
+            if (page.pdf_render_task) {
+                page.pdf_render_task.cancel?.();
+            }
+            if (page.pdf_canvas) {
+                page.pdf_canvas.width = 0;
+                page.pdf_canvas.height = 0;
+            }
             page.overlay_canvas = null;
             page.overlay_ctx = null;
+            page.pdf_canvas = null;
+            page.pdf_render_css_width = 0;
+            page.pdf_render_promise = null;
+            page.pdf_render_task = null;
+            page.pdf_text_layer = null;
             page.page_element = null;
         }
         this.pages_list = [];

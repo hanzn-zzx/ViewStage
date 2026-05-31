@@ -84,7 +84,6 @@ const DRAW_CONFIG = {
     dprMin: 1,
     dprMax: 4,
     dprStep: 0.5,
-    pdfScale: 2,
     imageSmoothingQuality: 'high',
     baseDpr: window.devicePixelRatio || 1,
     canvasBgColor: '#2a2a2a',
@@ -910,11 +909,6 @@ function main_setup_pdf_file_open() {
             needRestartCamera = true;
         }
         
-        if (settings.pdfScale !== undefined) {
-            DRAW_CONFIG.pdfScale = settings.pdfScale;
-            console.log('PDF 输出分辨率已更改:', settings.pdfScale);
-        }
-
         if (settings.dynamicDprEnabled !== undefined) {
             DRAW_CONFIG.dynamicDprEnabled = settings.dynamicDprEnabled;
         }
@@ -1002,14 +996,6 @@ async function main_render_pdf_pages_lazy(pdf, totalPages, initialPages = 3, doc
 }
 
 const PDF_INITIAL_RENDER_PAGES = 20;
-
-async function main_load_pdf_page(pdf, pageNum, docNumber) {
-    return DocLoader.render_pdf_page(pdf, pageNum, docNumber);
-}
-
-async function main_render_pdf_pages_parallel(pdf, totalPages, batchSize = 4, docNumber = null) {
-    return DocLoader.render_pdf_pages_parallel(pdf, totalPages, batchSize, docNumber);
-}
 
 async function main_load_pdf_from_path(filePath) {
     if (currentSourceId) {

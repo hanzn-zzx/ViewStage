@@ -102,7 +102,6 @@
     "restoreDefaults": "恢复默认",
     "defaultCamera": "默认摄像头",
     "cameraResolution": "摄像头分辨率",
-    "pdfOutputResolution": "PDF 输出分辨率",
     "mirror": "画面镜像",
     "denoiseFrameCount": "降噪帧数",
     "denoiseStrength": "降噪强度",
