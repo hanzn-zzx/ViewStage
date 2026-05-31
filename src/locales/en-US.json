@@ -86,6 +86,7 @@
     "resetApp": "Reset",
     "blackboardEnabled": "Blackboard",
     "memreductClean": "Auto Memory Cleanup",
+    "memreductCleanHint": "Requires Mem Reduct to be installed",
     "canvasScale": "Canvas Scale",
     "backgroundColor": "Background",
     "dprLimit": "Display Quality",

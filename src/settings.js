@@ -453,15 +453,26 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Mem Reduct 自动清理开关
                 const memreductCleanToggle = document.getElementById('memreductCleanToggle');
                 const memreductCleanItem = document.getElementById('memreductCleanItem');
-                if (memreductCleanToggle) {
-                    memreductCleanToggle.checked = settings.memreductCleanEnabled !== false;
-                }
-                // 非 Windows 平台隐藏此开关
-                if (memreductCleanItem && window.__TAURI__) {
+                const memreductCleanHint = document.getElementById('memreductCleanHint');
+                if (memreductCleanToggle && memreductCleanItem && window.__TAURI__) {
                     try {
-                        const platform = await window.__TAURI__.core.invoke('app_fetch_platform');
+                        const { invoke } = window.__TAURI__.core;
+                        const platform = await invoke('app_fetch_platform');
                         if (platform !== 'windows') {
                             memreductCleanItem.style.display = 'none';
+                        } else {
+                            const is_installed = await invoke('memreduct_check_installed');
+                            if (!is_installed) {
+                                memreductCleanToggle.checked = false;
+                                memreductCleanToggle.disabled = true;
+                                memreductCleanItem.classList.add('disabled');
+                                if (memreductCleanHint) {
+                                    memreductCleanHint.textContent = window.i18n?.format_translate('settings.memreductCleanHint') || '需安装 Mem Reduct 才能使用';
+                                    memreductCleanHint.style.display = '';
+                                }
+                            } else {
+                                memreductCleanToggle.checked = settings.memreductCleanEnabled !== false;
+                            }
                         }
                     } catch (_) { /* 忽略平台检测失败 */ }
                 }
