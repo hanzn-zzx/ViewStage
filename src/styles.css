@@ -1054,8 +1054,12 @@ body {
     align-items: center;
     gap: 16px;
     padding: 16px 0;
-    will-change: transform;
     transform-origin: 0 0;
+}
+
+/* 缩放/拖拽进行中时启用 GPU 合成层，结束后移除以释放显存 */
+.dr-zoom-wrapper.smooth-transform {
+    will-change: transform;
 }
 
 .doc-reader-page-tiles {
@@ -1096,6 +1100,30 @@ body {
     color: var(--color-body);
     user-select: none;
     white-space: nowrap;
+}
+
+/* 页码跳转输入框 */
+.dr-page-jump-input {
+    width: 48px;
+    height: 26px;
+    border: 1px solid var(--color-border, #666);
+    border-radius: 4px;
+    background: var(--color-surface, #333);
+    color: var(--color-body, #eee);
+    font-size: 12px;
+    text-align: center;
+    outline: none;
+    padding: 0 2px;
+    -moz-appearance: textfield;
+}
+.dr-page-jump-input::-webkit-inner-spin-button,
+.dr-page-jump-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.dr-page-jump-input:focus {
+    border-color: var(--color-accent, #4a9eff);
+    box-shadow: 0 0 0 1px var(--color-accent, #4a9eff);
 }
 
 /* 文档阅读器页面侧边栏 */

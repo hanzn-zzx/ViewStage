@@ -47,13 +47,21 @@ class DocumentReaderManager {
         this._last_loaded_index = -1;
         this._page_visible_timeout_id = null;
         this._resize_raf_id = null;
-        this._gpu_cleanup_delay_ms = 1500;
-        this._tile_keep_distance = 1;
+        this._wheel_raf_id = null;               // 滚轮缩放 rAF 节流
+        this._smooth_transform_timeout_id = null; // will-change 延迟移除
+        this._gpu_cleanup_delay_ms = 800;
+        this._tile_keep_distance = 2;
         this._image_keep_distance = 2;
-        this._blob_keep_distance = 5;
+        this._blob_keep_distance = 3;
+        this._prerender_distance = 2;           // 预渲染距离：提前渲染前后2页
+        this._prerender_enabled = true;         // 预渲染开关
+        this._prerender_queue = [];             // 预渲染队列
+        this._prerender_raf_id = null;          // 预渲染 rAF ID
+        this._is_prerendering = false;          // 是否正在预渲染
         this._sidebar_virtual_threshold = 160;
         this._sidebar_item_height = 128;
         this._sidebar_overscan = 8;
+        this._max_history_steps = 15;
         this._sidebar_thumbnail_cache = new Map(); // 缩略图缓存：page_index -> blob URL
 
         // 分块渲染相关
@@ -80,6 +88,30 @@ class DocumentReaderManager {
         this.dr_max_scale = 4;
         this.dr_cached_inv_scale = 1;
         this._zoom_wrapper = null;
+
+        // 触摸手势优化状态
+        this._touch_raf_id = null;               // 捏合缩放 rAF 节流 ID
+        this._touch_pending_data = null;          // 待处理的触摸数据 { t0, t1 }
+        this._touch_start_center_x = 0;           // 捏合起始中心 X
+        this._touch_start_center_y = 0;           // 捏合起始中心 Y
+
+        this._drag_velocity = { x: 0, y: 0 };    // 拖拽速度（像素/毫秒）
+        this._drag_last_time = 0;                 // 上次拖拽采样时间
+        this._drag_last_pos = { x: 0, y: 0 };    // 上次拖拽采样位置
+        this._drag_velocity_samples = [];          // 最近速度采样（平滑用，最多5个）
+        this._inertia_raf_id = null;              // 惯性滚动 rAF ID
+
+        this._touch_start_time = 0;               // 触摸开始时间戳（手掌误触判定）
+        this._touch_is_palm = false;              // 是否判定为手掌触摸
+
+        // 自适应 DPR（按缩放级别 + 内存压力动态降级，减少 4K 屏幕 GPU 显存占用）
+        this._adaptive_dpr_enabled = true;
+
+        // 懒文本层（默认关闭，节省内存；需要复制/搜索/无障碍时手动开启）
+        this._text_layer_enabled = false;
+
+        // 已初始化 tile 的页面索引集合（_dr_apply_scale 仅遍历此集合，跳过无 tile 页面）
+        this._pages_with_tiles = new Set();
     }
 
     // ====== 初始化 ======
@@ -186,6 +218,63 @@ class DocumentReaderManager {
             this._resize_raf_id = null;
         }
 
+        // 清理触摸手势动画 rAF
+        if (this._touch_raf_id !== null) {
+            cancelAnimationFrame(this._touch_raf_id);
+            this._touch_raf_id = null;
+        }
+        this._touch_pending_data = null;
+
+        if (this._inertia_raf_id !== null) {
+            cancelAnimationFrame(this._inertia_raf_id);
+            this._inertia_raf_id = null;
+        }
+        this._drag_velocity_samples = [];
+        if (this._wheel_raf_id !== null) {
+            cancelAnimationFrame(this._wheel_raf_id);
+            this._wheel_raf_id = null;
+        }
+        if (this._smooth_transform_timeout_id !== null) {
+            clearTimeout(this._smooth_transform_timeout_id);
+            this._smooth_transform_timeout_id = null;
+        }
+
+        // 清理预渲染队列
+        this._cancel_prerender();
+
+        // 移除滚动容器上的绘制/缩放事件监听器，防止内存泄漏
+        if (this._scroll_container) {
+            if (window.PointerEvent) {
+                if (this._bound_handle_pointer_down) {
+                    this._scroll_container.removeEventListener('pointerdown', this._bound_handle_pointer_down);
+                    this._scroll_container.removeEventListener('pointermove', this._bound_handle_pointer_move);
+                    this._scroll_container.removeEventListener('pointerup', this._bound_handle_pointer_up);
+                    this._scroll_container.removeEventListener('pointerleave', this._bound_handle_pointer_up);
+                    this._scroll_container.removeEventListener('pointercancel', this._bound_handle_pointer_up);
+                }
+            } else {
+                if (this._bound_handle_mouse_down) {
+                    this._scroll_container.removeEventListener('mousedown', this._bound_handle_mouse_down);
+                    this._scroll_container.removeEventListener('mousemove', this._bound_handle_mouse_move);
+                    this._scroll_container.removeEventListener('mouseup', this._bound_handle_mouse_up);
+                    this._scroll_container.removeEventListener('mouseleave', this._bound_handle_mouse_up);
+                }
+            }
+            if (this._bound_dr_handle_wheel) {
+                this._scroll_container.removeEventListener('wheel', this._bound_dr_handle_wheel);
+                this._scroll_container.removeEventListener('touchstart', this._bound_dr_handle_touch_start);
+                this._scroll_container.removeEventListener('touchmove', this._bound_dr_handle_touch_move);
+                this._scroll_container.removeEventListener('touchend', this._bound_dr_handle_touch_end);
+                this._scroll_container.removeEventListener('touchcancel', this._bound_dr_handle_touch_end);
+            }
+        }
+
+        // 移除键盘事件监听器
+        if (this._bound_handle_keydown) {
+            document.removeEventListener('keydown', this._bound_handle_keydown);
+            this._bound_handle_keydown = null;
+        }
+
         this.is_open = false;
         window.__HISTORY_ISOLATED = false;
 
@@ -198,14 +287,7 @@ class DocumentReaderManager {
             this._eraser_hint = null;
         }
 
-        // 保存当前页的 undo/redo
-        const cur_page = this.page_manager.get_current_page();
-        if (cur_page) {
-            cur_page.undo_list = history_state.undo_list;
-            cur_page.redo_list = history_state.redo_list;
-        }
-
-        // 保存所有页的批注到缓存
+        // 保存所有页的批注到缓存（含全局 undo/redo 历史）
         await this._save_annotations_to_cache();
 
         // 恢复主画面历史
@@ -219,6 +301,7 @@ class DocumentReaderManager {
 
         this._destroy_lazy_loading();
         this._destroy_all_tiles();
+        this._pages_with_tiles.clear();
         this.page_manager.destroy();
 
         // 清理 batch_draw 和 overlay_canvas
@@ -249,6 +332,13 @@ class DocumentReaderManager {
         this.dr_cached_inv_scale = 1;
         this._zoom_wrapper = null;
 
+        // 重置触摸手势状态
+        this._drag_velocity = { x: 0, y: 0 };
+        this._drag_last_time = 0;
+        this._drag_last_pos = { x: 0, y: 0 };
+        this._touch_start_time = 0;
+        this._touch_is_palm = false;
+
         const panel = document.getElementById('documentReaderPanel');
         if (panel) panel.classList.remove('active');
 
@@ -271,7 +361,7 @@ class DocumentReaderManager {
         }
     }
 
-    /** 将所有页的批注序列化写入缓存文件 */
+    /** 将所有页的批注序列化写入缓存文件（含全局 undo/redo 历史） */
     async _save_annotations_to_cache() {
         if (this.folder_index < 0) return;
         const cache_dir = window.cacheDir;
@@ -281,15 +371,40 @@ class DocumentReaderManager {
 
         const pages = this.page_manager.pages_list;
         const folder = window.state.fileList[this.folder_index];
+
+        // 序列化全局 undo/redo 栈（保留 page_index 和 stroke _cache_uid 用于重建）
+        const serialize_cmd = (cmd) => {
+            if (cmd.type === 'draw') {
+                return { type: 'draw', page_index: cmd.page_index, stroke_uid: cmd.stroke?._cache_uid || null };
+            } else if (cmd.type === 'clear') {
+                return {
+                    type: 'clear',
+                    page_index: cmd.page_index,
+                    saved_strokes: (cmd.savedStrokeHistory || []).map(s => ({
+                        _cache_uid: s._cache_uid,
+                        points: s.points,
+                        color: s.color,
+                        lineWidth: s.lineWidth,
+                        eraserSize: s.eraserSize,
+                        eraserSizeRaw: s.eraserSizeRaw,
+                        storedWidths: s.storedWidths,
+                        bounds: s.bounds,
+                        type: s.type
+                    }))
+                };
+            }
+            return null;
+        };
+
         const cache_data = {
-            version: 2,
+            version: 3,
             folder_index: this.folder_index,
             file_md5: folder?.fileMd5 || null,
             pages: pages.map(p => ({
-                stroke_history: p.stroke_history,
-                undo_list: p.undo_list,
-                redo_list: p.redo_list
-            }))
+                stroke_history: p.stroke_history
+            })),
+            undo_stack: history_state.undo_list.map(serialize_cmd).filter(Boolean),
+            redo_stack: history_state.redo_list.map(serialize_cmd).filter(Boolean)
         };
 
         try {
@@ -301,7 +416,7 @@ class DocumentReaderManager {
         }
     }
 
-    /** 从缓存文件恢复所有页的批注 */
+    /** 从缓存文件恢复所有页的批注和全局 undo/redo 历史 */
     async _load_annotations_from_cache() {
         if (this.folder_index < 0) return;
         const cache_dir = window.cacheDir;
@@ -318,17 +433,66 @@ class DocumentReaderManager {
 
             const pages = this.page_manager.pages_list;
             const len = Math.min(cache_data.pages.length, pages.length);
+
+            // 恢复每页的 stroke_history
             for (let i = 0; i < len; i++) {
                 const src = cache_data.pages[i];
                 const dst = pages[i];
                 if (src.stroke_history) dst.stroke_history = src.stroke_history;
-                if (src.undo_list) dst.undo_list = src.undo_list;
-                if (src.redo_list) dst.redo_list = src.redo_list;
+            }
+
+            // v3 格式：重建全局 undo/redo 栈
+            if (cache_data.version >= 3 && cache_data.undo_stack) {
+                this._rebuild_history_from_cache(cache_data.undo_stack, pages, history_state.undo_list);
+            }
+            if (cache_data.version >= 3 && cache_data.redo_stack) {
+                this._rebuild_history_from_cache(cache_data.redo_stack, pages, history_state.redo_list);
             }
         } catch (err) {
             // 文件不存在或解析失败 → 无缓存，忽略
             if (err && err.code !== 'ENOENT' && !err.message?.includes('No such file')) {
                 console.error('[document_reader] 恢复批注缓存失败:', err);
+            }
+        }
+    }
+
+    /**
+     * 从缓存数据重建 undo/redo 栈命令
+     * 通过 stroke._cache_uid 匹配还原后的 stroke_history 中的对象引用
+     */
+    _rebuild_history_from_cache(serialized_list, pages, target_stack) {
+        for (const entry of serialized_list) {
+            const page = pages[entry.page_index];
+            if (!page) continue;
+
+            if (entry.type === 'draw' && entry.stroke_uid) {
+                const stroke = page.stroke_history.find(s => s._cache_uid === entry.stroke_uid);
+                if (stroke) {
+                    const cmd = new DrawCommand({
+                        stroke,
+                        strokeHistoryRef: page.stroke_history,
+                        redrawFn: () => this._render_all_strokes(stroke.bounds)
+                    });
+                    cmd.page_index = entry.page_index;
+                    target_stack.push(cmd);
+                }
+            } else if (entry.type === 'clear' && entry.saved_strokes) {
+                // 重建 ClearCommand：saved_strokes 为清空前的笔画快照
+                const saved_strokes = entry.saved_strokes.map(s_data => {
+                    // 尝试匹配 stroke_history 中的对象（若笔画未被清除）
+                    const existing = page.stroke_history.find(s => s._cache_uid === s_data._cache_uid);
+                    return existing || s_data;
+                });
+                const cmd = new ClearCommand({
+                    savedStrokeHistory: saved_strokes,
+                    strokeHistoryRef: page.stroke_history,
+                    baseImageURLRef: { get value() { return null; }, set value(v) {} },
+                    baseImageObjRef: { get value() { return null; }, set value(v) {} },
+                    redrawFn: () => this._render_all_strokes(),
+                    loadBaseImageFn: () => Promise.resolve()
+                });
+                cmd.page_index = entry.page_index;
+                target_stack.push(cmd);
             }
         }
     }
@@ -443,6 +607,15 @@ class DocumentReaderManager {
         let nearest_page = -1;
         let nearest_dist = Infinity;
         const viewport_center = (container_top + container_bottom) / 2;
+        const viewport_height = container_bottom - container_top;
+
+        // 预渲染范围：视口上下扩展 viewport_height * _prerender_distance
+        const prerender_margin = viewport_height * this._prerender_distance;
+        const prerender_top = container_top - prerender_margin;
+        const prerender_bottom = container_bottom + prerender_margin;
+
+        const visible_pages = [];
+        const prerender_pages = [];
 
         for (let i = 0; i < this.page_manager.pages_list.length; i++) {
             const page_data = this.page_manager.pages_list[i];
@@ -457,9 +630,15 @@ class DocumentReaderManager {
             const visual_bottom = wrapper_top + page_bottom * s;
 
             const is_intersecting = visual_bottom > container_top && visual_top < container_bottom;
+            const is_in_prerender_range = visual_bottom > prerender_top && visual_top < prerender_bottom;
 
             if (is_intersecting) {
+                visible_pages.push(i);
                 this._on_page_visible(i);
+            } else if (is_in_prerender_range && this._prerender_enabled) {
+                // 在预渲染范围内但不在视口中 → 添加到预渲染队列
+                prerender_pages.push(i);
+                this._on_page_hidden(i);
             } else {
                 this._on_page_hidden(i);
             }
@@ -471,6 +650,11 @@ class DocumentReaderManager {
                 nearest_dist = dist;
                 nearest_page = i;
             }
+        }
+
+        // 触发预渲染（按距离排序，优先渲染最近的页面）
+        if (prerender_pages.length > 0) {
+            this._schedule_prerender(prerender_pages, nearest_page);
         }
 
         // 同步翻页器到距离视口中心最近的页
@@ -488,6 +672,113 @@ class DocumentReaderManager {
                 }
             }
         }
+    }
+
+    // ====== 预渲染调度 ======
+
+    /** 调度预渲染任务（按距离排序，使用 requestIdleCallback 或 rAF） */
+    _schedule_prerender(page_indices, active_page) {
+        // 按距离当前页排序（优先渲染最近的页面）
+        const sorted = page_indices
+            .filter(i => {
+                const pd = this.page_manager.pages_list[i];
+                return pd && !pd.is_visible && !pd.pdf_render_promise;
+            })
+            .sort((a, b) => Math.abs(a - active_page) - Math.abs(b - active_page));
+
+        // 限制预渲染队列长度（最多3页）
+        this._prerender_queue = sorted.slice(0, 3);
+
+        // 如果没有正在预渲染的任务，启动预渲染
+        if (!this._is_prerendering && this._prerender_queue.length > 0) {
+            this._process_prerender_queue();
+        }
+    }
+
+    /** 处理预渲染队列（使用 requestIdleCallback 避免阻塞主线程） */
+    _process_prerender_queue() {
+        if (this._prerender_queue.length === 0 || !this._prerender_enabled) {
+            this._is_prerendering = false;
+            return;
+        }
+
+        this._is_prerendering = true;
+
+        const process_next = () => {
+            if (this._prerender_queue.length === 0 || !this._prerender_enabled) {
+                this._is_prerendering = false;
+                return;
+            }
+
+            const page_index = this._prerender_queue.shift();
+            const page_data = this.page_manager.pages_list[page_index];
+
+            // 如果页面已可见或正在渲染，跳过
+            if (!page_data || page_data.is_visible || page_data.pdf_render_promise) {
+                this._process_prerender_queue();
+                return;
+            }
+
+            // 使用 requestIdleCallback 在空闲时预渲染
+            const prerender_fn = () => {
+                this._prerender_page(page_index).then(() => {
+                    // 继续处理下一个
+                    this._process_prerender_queue();
+                });
+            };
+
+            if (window.requestIdleCallback) {
+                window.requestIdleCallback(prerender_fn, { timeout: 1000 });
+            } else {
+                // 降级：使用 setTimeout
+                setTimeout(prerender_fn, 50);
+            }
+        };
+
+        process_next();
+    }
+
+    /** 预渲染单个页面（仅渲染 PDF，不初始化 tiles） */
+    async _prerender_page(page_index) {
+        const page_data = this.page_manager.pages_list[page_index];
+        if (!page_data || page_data.is_visible || page_data.pdf_render_promise) return;
+
+        // 确保页面 DOM 已创建
+        this._ensure_page_runtime_dom(page_index);
+
+        // 如果是 PDF 页面，提前渲染
+        if (page_data.render_mode === 'pdfjs') {
+            await this._render_pdf_page_direct(page_index, false, true);
+        }
+    }
+
+    /** 翻页时预渲染目标页及相邻页 */
+    _prerender_for_navigation(target_index) {
+        if (!this._prerender_enabled) return;
+
+        const pages = this.page_manager.pages_list;
+        const prerender_indices = [];
+
+        // 预渲染目标页的前后各1页
+        for (let offset = -1; offset <= 1; offset++) {
+            const idx = target_index + offset;
+            if (idx >= 0 && idx < pages.length && idx !== this.active_page_index) {
+                const pd = pages[idx];
+                if (pd && !pd.is_visible && !pd.pdf_render_promise) {
+                    prerender_indices.push(idx);
+                }
+            }
+        }
+
+        if (prerender_indices.length > 0) {
+            this._schedule_prerender(prerender_indices, target_index);
+        }
+    }
+
+    /** 取消所有预渲染任务 */
+    _cancel_prerender() {
+        this._prerender_queue = [];
+        this._is_prerendering = false;
     }
 
     _on_page_visible(page_index) {
@@ -768,17 +1059,43 @@ class DocumentReaderManager {
             page_data.pdf_canvas = page_el.querySelector('.doc-reader-pdf-canvas');
         }
 
-        if (!page_el.querySelector('.doc-reader-text-layer')) {
-            const text_layer = document.createElement('div');
-            text_layer.className = 'doc-reader-text-layer';
-            page_el.appendChild(text_layer);
-            page_data.pdf_text_layer = text_layer;
+        // 文本层仅在启用时创建（默认关闭，节省 DOM 节点和内存）
+        if (this._text_layer_enabled) {
+            if (!page_el.querySelector('.doc-reader-text-layer')) {
+                const text_layer = document.createElement('div');
+                text_layer.className = 'doc-reader-text-layer';
+                page_el.appendChild(text_layer);
+                page_data.pdf_text_layer = text_layer;
+            } else {
+                page_data.pdf_text_layer = page_el.querySelector('.doc-reader-text-layer');
+            }
         } else {
-            page_data.pdf_text_layer = page_el.querySelector('.doc-reader-text-layer');
+            // 未启用时移除已存在的文本层，释放 DOM 节点
+            const existing = page_el.querySelector('.doc-reader-text-layer');
+            if (existing) existing.remove();
+            page_data.pdf_text_layer = null;
         }
     }
 
-    async _render_pdf_page_direct(page_index, force = false) {
+    /**
+     * 根据缩放级别和内存压力计算自适应 DPR
+     * @param {number} base_dpr - 基础设备像素比
+     * @param {number} scale - 当前缩放级别
+     * @returns {number} 降级后的 DPR（1 或 2）
+     */
+    _calculate_adaptive_dpr(base_dpr, scale) {
+        if (!this._adaptive_dpr_enabled) return Math.min(base_dpr, 2);
+
+        // 极端缩放时降低 DPR：放大查看细节不需要高分辨率，缩小时细节不可见
+        if (scale > 2 || scale < 0.5) return 1;
+
+        // 内存压力检测：堆内存超 500MB 时降级 DPR
+        if (performance.memory?.usedJSHeapSize > 500 * 1024 * 1024) return 1;
+
+        return Math.min(base_dpr, 2);
+    }
+
+    async _render_pdf_page_direct(page_index, force = false, is_prerender = false) {
         const page_data = this.page_manager.pages_list[page_index];
         if (!page_data || page_data.render_mode !== 'pdfjs') return;
         if (page_data.pdf_render_promise && !force) return page_data.pdf_render_promise;
@@ -805,7 +1122,17 @@ class DocumentReaderManager {
                 const base_viewport = pdf_page.getViewport({ scale: 1 });
                 const css_scale = css_w / base_viewport.width;
                 const css_viewport = pdf_page.getViewport({ scale: css_scale });
-                const render_dpr = Math.min(window.devicePixelRatio || window.DRAW_CONFIG?.dpr || 1, 2);
+
+                // 预渲染使用更低的 DPR 以节省内存
+                let render_dpr;
+                if (is_prerender) {
+                    render_dpr = 1; // 预渲染固定使用 1x
+                } else {
+                    render_dpr = this._calculate_adaptive_dpr(
+                        window.devicePixelRatio || window.DRAW_CONFIG?.dpr || 1,
+                        this.dr_scale
+                    );
+                }
                 const render_viewport = pdf_page.getViewport({ scale: css_scale * render_dpr });
 
                 page_data.page_width = base_viewport.width;
@@ -814,17 +1141,20 @@ class DocumentReaderManager {
 
                 const canvas = page_data.pdf_canvas;
                 const text_layer = page_data.pdf_text_layer;
-                if (!canvas || !text_layer) return;
+                if (!canvas) return;
 
                 canvas.width = Math.ceil(render_viewport.width);
                 canvas.height = Math.ceil(render_viewport.height);
                 canvas.style.width = Math.ceil(css_viewport.width) + 'px';
                 canvas.style.height = Math.ceil(css_viewport.height) + 'px';
 
-                text_layer.replaceChildren();
-                text_layer.style.width = Math.ceil(css_viewport.width) + 'px';
-                text_layer.style.height = Math.ceil(css_viewport.height) + 'px';
-                text_layer.style.setProperty('--scale-factor', css_scale);
+                // 文本层仅在启用时操作（默认关闭节省内存）
+                if (this._text_layer_enabled && text_layer) {
+                    text_layer.replaceChildren();
+                    text_layer.style.width = Math.ceil(css_viewport.width) + 'px';
+                    text_layer.style.height = Math.ceil(css_viewport.height) + 'px';
+                    text_layer.style.setProperty('--scale-factor', css_scale);
+                }
 
                 const ctx = canvas.getContext('2d', { alpha: false });
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -839,14 +1169,18 @@ class DocumentReaderManager {
                 await render_task.promise;
                 page_data.pdf_render_task = null;
 
-                const text_content = await pdf_page.getTextContent();
-                const text_task = window.pdfjsLib.renderTextLayer({
-                    textContentSource: text_content,
-                    container: text_layer,
-                    viewport: css_viewport,
-                    enhanceTextSelection: true
-                });
-                await text_task.promise;
+                // 文本层渲染仅在启用时执行（getTextContent + renderTextLayer 开销较大）
+                // 预渲染时跳过文本层
+                if (!is_prerender && this._text_layer_enabled && text_layer) {
+                    const text_content = await pdf_page.getTextContent();
+                    const text_task = window.pdfjsLib.renderTextLayer({
+                        textContentSource: text_content,
+                        container: text_layer,
+                        viewport: css_viewport,
+                        enhanceTextSelection: true
+                    });
+                    await text_task.promise;
+                }
                 page_data.pdf_render_css_width = css_w;
             } finally {
                 pdf_page.cleanup?.();
@@ -1070,13 +1404,10 @@ class DocumentReaderManager {
         };
 
         page_data.stroke_history.forEach(scale_stroke);
-        page_data.undo_list.forEach(scale_command);
-        page_data.redo_list.forEach(scale_command);
 
-        if (page_data.index === this.page_manager.current_index) {
-            history_state.undo_list.forEach(scale_command);
-            history_state.redo_list.forEach(scale_command);
-        }
+        // 全局 undo/redo 栈包含所有页面的命令，仅在首次调用时缩放（通过 WeakSet 去重）
+        history_state.undo_list.forEach(scale_command);
+        history_state.redo_list.forEach(scale_command);
     }
 
     _init_page_tiles(page_index) {
@@ -1107,6 +1438,7 @@ class DocumentReaderManager {
         tile_renderer.init_tiles(tiles_container, 1);
         page_data.tile_renderer = tile_renderer;
         page_data.is_tiles_initialized = true;
+        this._pages_with_tiles.add(page_index);
 
         // 初始化 batch_draw（如果还没有初始化）
         if (!this.batch_draw) {
@@ -1228,6 +1560,7 @@ class DocumentReaderManager {
         const tiles_container = page_data.page_element?.querySelector('.doc-reader-page-tiles');
         if (tiles_container) tiles_container.innerHTML = '';
         page_data.is_tiles_initialized = false;
+        this._pages_with_tiles.delete(page_index);
     }
 
     _destroy_all_tiles() {
@@ -1329,47 +1662,133 @@ class DocumentReaderManager {
     _setup_events() {
         if (!this._scroll_container) return;
 
+        // 存储绑定引用，确保 close() 时可精确移除
         if (window.PointerEvent) {
-            this._scroll_container.addEventListener('pointerdown', (e) => this._handle_pointer_down(e));
-            this._scroll_container.addEventListener('pointermove', (e) => this._handle_pointer_move(e));
-            this._scroll_container.addEventListener('pointerup', (e) => this._handle_pointer_up(e));
-            this._scroll_container.addEventListener('pointerleave', (e) => this._handle_pointer_up(e));
-            this._scroll_container.addEventListener('pointercancel', (e) => this._handle_pointer_up(e));
+            this._bound_handle_pointer_down = (e) => this._handle_pointer_down(e);
+            this._bound_handle_pointer_move = (e) => this._handle_pointer_move(e);
+            this._bound_handle_pointer_up = (e) => this._handle_pointer_up(e);
+
+            this._scroll_container.addEventListener('pointerdown', this._bound_handle_pointer_down);
+            this._scroll_container.addEventListener('pointermove', this._bound_handle_pointer_move);
+            this._scroll_container.addEventListener('pointerup', this._bound_handle_pointer_up);
+            this._scroll_container.addEventListener('pointerleave', this._bound_handle_pointer_up);
+            this._scroll_container.addEventListener('pointercancel', this._bound_handle_pointer_up);
         } else {
-            this._scroll_container.addEventListener('mousedown', (e) => this._handle_mouse_down(e));
-            this._scroll_container.addEventListener('mousemove', (e) => this._handle_mouse_move(e));
-            this._scroll_container.addEventListener('mouseup', (e) => this._handle_mouse_up(e));
-            this._scroll_container.addEventListener('mouseleave', (e) => this._handle_mouse_up(e));
+            this._bound_handle_mouse_down = (e) => this._handle_mouse_down(e);
+            this._bound_handle_mouse_move = (e) => this._handle_mouse_move(e);
+            this._bound_handle_mouse_up = (e) => this._handle_mouse_up(e);
+
+            this._scroll_container.addEventListener('mousedown', this._bound_handle_mouse_down);
+            this._scroll_container.addEventListener('mousemove', this._bound_handle_mouse_move);
+            this._scroll_container.addEventListener('mouseup', this._bound_handle_mouse_up);
+            this._scroll_container.addEventListener('mouseleave', this._bound_handle_mouse_up);
         }
 
         // 缩放事件：滚轮 + 双指触摸（始终注册，PointerEvent 不转发双指事件）
-        this._scroll_container.addEventListener('wheel', (e) => this._dr_handle_wheel(e), { passive: false });
-        this._scroll_container.addEventListener('touchstart', (e) => this._dr_handle_touch_start(e), { passive: false });
-        this._scroll_container.addEventListener('touchmove', (e) => this._dr_handle_touch_move(e), { passive: false });
-        this._scroll_container.addEventListener('touchend', (e) => this._dr_handle_touch_end(e), { passive: false });
-        this._scroll_container.addEventListener('touchcancel', (e) => this._dr_handle_touch_end(e), { passive: false });
+        this._bound_dr_handle_wheel = (e) => this._dr_handle_wheel(e);
+        this._bound_dr_handle_touch_start = (e) => this._dr_handle_touch_start(e);
+        this._bound_dr_handle_touch_move = (e) => this._dr_handle_touch_move(e);
+        this._bound_dr_handle_touch_end = (e) => this._dr_handle_touch_end(e);
+
+        this._scroll_container.addEventListener('wheel', this._bound_dr_handle_wheel, { passive: false });
+        this._scroll_container.addEventListener('touchstart', this._bound_dr_handle_touch_start, { passive: false });
+        this._scroll_container.addEventListener('touchmove', this._bound_dr_handle_touch_move, { passive: false });
+        this._scroll_container.addEventListener('touchend', this._bound_dr_handle_touch_end, { passive: false });
+        this._scroll_container.addEventListener('touchcancel', this._bound_dr_handle_touch_end, { passive: false });
     }
 
     _setup_keyboard_events() {
-        document.addEventListener('keydown', (e) => {
-            if (!this.is_open) return;
+        this._bound_handle_keydown = (e) => this._handle_keydown(e);
+        document.addEventListener('keydown', this._bound_handle_keydown);
+    }
 
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                this.close();
-            }
+    _handle_keydown(e) {
+        if (!this.is_open) return;
 
-            // Ctrl+0 / Cmd+0 重置缩放
-            if ((e.ctrlKey || e.metaKey) && e.key === '0') {
-                e.preventDefault();
-                if (this.dr_scale !== 1 || this.dr_canvas_x !== 0 || this.dr_canvas_y !== 0) {
-                    this.dr_scale = 1;
-                    this.dr_canvas_x = 0;
-                    this.dr_canvas_y = 0;
-                    this._dr_apply_scale();
-                }
+        // 输入框聚焦时跳过快捷键（避免干扰页面跳转输入）
+        const active_tag = document.activeElement?.tagName;
+        const is_input_focused = active_tag === 'INPUT' || active_tag === 'TEXTAREA';
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            // 若页面跳转输入框聚焦，由输入框自身处理 Escape
+            if (is_input_focused && document.activeElement?.classList?.contains('dr-page-jump-input')) return;
+            this.close();
+        }
+
+        // Ctrl+0 / Cmd+0 重置缩放
+        if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+            e.preventDefault();
+            if (this.dr_scale !== 1 || this.dr_canvas_x !== 0 || this.dr_canvas_y !== 0) {
+                this.dr_scale = 1;
+                this.dr_canvas_x = 0;
+                this.dr_canvas_y = 0;
+                this._dr_apply_scale();
             }
-        });
+            return;
+        }
+
+        if (is_input_focused) return;
+
+        // Home → 第一页，End → 最后一页
+        if (e.key === 'Home') {
+            e.preventDefault();
+            this._scroll_to_page(0);
+            this.page_manager.current_index = 0;
+            this.active_page_index = 0;
+            this._update_page_indicator();
+            this._sync_page_buttons();
+            return;
+        }
+        if (e.key === 'End') {
+            e.preventDefault();
+            const last = this.page_manager.get_page_count() - 1;
+            this._scroll_to_page(last);
+            this.page_manager.current_index = last;
+            this.active_page_index = last;
+            this._update_page_indicator();
+            this._sync_page_buttons();
+            return;
+        }
+
+        // PageUp → 上一页，PageDown → 下一页
+        if (e.key === 'PageUp') {
+            e.preventDefault();
+            this.handle_page_nav_prev();
+            return;
+        }
+        if (e.key === 'PageDown') {
+            e.preventDefault();
+            this.handle_page_nav_next();
+            return;
+        }
+
+        // +/- 缩放（0.15 步长）
+        if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            this._dr_zoom_by_step(0.15);
+            return;
+        }
+        if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            this._dr_zoom_by_step(-0.15);
+            return;
+        }
+    }
+
+    /** 以视口中心为基准缩放指定步长 */
+    _dr_zoom_by_step(delta) {
+        const new_s = Math.max(this.dr_min_scale, Math.min(this.dr_max_scale, this.dr_scale + delta));
+        if (new_s === this.dr_scale) return;
+
+        const ratio = new_s / this.dr_scale;
+        const cx = this._scroll_container?.clientWidth / 2 || 0;
+        const cy = this._scroll_container?.clientHeight / 2 || 0;
+
+        this.dr_canvas_x = cx - (cx - this.dr_canvas_x) * ratio;
+        this.dr_canvas_y = cy - (cy - this.dr_canvas_y) * ratio;
+        this.dr_scale = new_s;
+        this._dr_apply_scale();
     }
 
     _handle_pointer_down(e) {
@@ -1380,6 +1799,23 @@ class DocumentReaderManager {
 
         const page_index = parseInt(target.dataset.page);
         if (isNaN(page_index)) return;
+
+        // 手掌误触判定：触摸事件记录起始时间和压力
+        const is_touch = e.pointerType === 'touch';
+        if (is_touch) {
+            this._touch_start_time = Date.now();
+            // contactSize 为触摸面积（部分设备支持），压力过小或面积过大视为手掌
+            const contact_size = e.width * e.height;
+            this._touch_is_palm = (contact_size > 800) || (e.pressure === 0 && e.pressure !== undefined);
+        } else {
+            this._touch_is_palm = false;
+        }
+
+        // 停止正在进行的惯性滚动
+        if (this._inertia_raf_id !== null) {
+            cancelAnimationFrame(this._inertia_raf_id);
+            this._inertia_raf_id = null;
+        }
 
         // 确保该页的 TileRenderer 已初始化
         const page_data = this.page_manager.pages_list[page_index];
@@ -1405,7 +1841,18 @@ class DocumentReaderManager {
             this.dr_is_dragging = true;
             this.dr_start_drag_x = e.clientX - this.dr_canvas_x;
             this.dr_start_drag_y = e.clientY - this.dr_canvas_y;
+
+            // will-change: 按需启用 GPU 合成层
+            this._dr_enable_smooth_transform();
+
+            // 初始化速度采样
+            this._drag_last_time = performance.now();
+            this._drag_last_pos = { x: e.clientX, y: e.clientY };
+            this._drag_velocity_samples = [];
         } else if (this.draw_mode === 'comment' || this.draw_mode === 'eraser') {
+            // 手掌误触跳过
+            if (this._touch_is_palm) return;
+
             e.preventDefault();
             this.is_drawing = true;
             // 批注时屏蔽浏览器原生滚动
@@ -1423,9 +1870,28 @@ class DocumentReaderManager {
     }
 
     _handle_pointer_move(e) {
+        // 手掌误触期间跳过批注绘制（触摸事件 + 快速移动 + 接触面积过大）
+        if (this._touch_is_palm && this.draw_mode !== 'move') return;
+
         // 拖拽平移
         if (this.dr_is_dragging) {
             e.preventDefault();
+
+            // 采集速度样本（最近5个，用于惯性滚动）
+            const now = performance.now();
+            const dt = now - this._drag_last_time;
+            if (dt > 0) {
+                const vx = (e.clientX - this._drag_last_pos.x) / dt;
+                const vy = (e.clientY - this._drag_last_pos.y) / dt;
+                this._drag_velocity_samples.push({ x: vx, y: vy, t: now });
+                // 保留最近 5 个采样
+                if (this._drag_velocity_samples.length > 5) {
+                    this._drag_velocity_samples.shift();
+                }
+                this._drag_last_time = now;
+                this._drag_last_pos = { x: e.clientX, y: e.clientY };
+            }
+
             this.dr_canvas_x = e.clientX - this.dr_start_drag_x;
             this.dr_canvas_y = e.clientY - this.dr_start_drag_y;
             this._dr_update_canvas_position();
@@ -1434,6 +1900,18 @@ class DocumentReaderManager {
         }
 
         if (!this.is_drawing || this.active_page_index < 0) return;
+
+        // 手掌误触检测：触摸事件在 50ms 内移动超过 10px 视为误触
+        if (e.pointerType === 'touch') {
+            const elapsed = Date.now() - this._touch_start_time;
+            if (elapsed < 50) {
+                const move_dist = Math.abs(e.clientX - this._drag_last_pos.x) + Math.abs(e.clientY - this._drag_last_pos.y);
+                if (move_dist > 10) {
+                    this._touch_is_palm = true;
+                    return;
+                }
+            }
+        }
 
         e.preventDefault();
 
@@ -1476,11 +1954,60 @@ class DocumentReaderManager {
     }
 
     async _handle_pointer_up(e) {
-        // 停止拖拽
+        // 手掌误触：取消笔画
+        if (this._touch_is_palm) {
+            this._touch_is_palm = false;
+            if (this.is_drawing) {
+                this.is_drawing = false;
+                this.draw_canvas_rect = null;
+                this.current_stroke = null;
+                if (this.batch_draw) {
+                    this.batch_draw.batch_draw_delete_all();
+                }
+            }
+            return;
+        }
+
+        // 停止拖拽，启动惯性滚动
         if (this.dr_is_dragging) {
             this.dr_is_dragging = false;
-            // 拖拽后检查可见性（新页面进入视口需加载）
-            this._check_page_visibility();
+
+            // will-change: 延迟释放 GPU 合成层
+            this._dr_schedule_disable_smooth_transform();
+
+            // 计算平均速度（取最近采样的加权平均）
+            const samples = this._drag_velocity_samples;
+            let vx = 0, vy = 0;
+            if (samples.length > 0) {
+                // 时间加权：越近的采样权重越高
+                let total_weight = 0;
+                const now = performance.now();
+                for (const s of samples) {
+                    const age = now - s.t;
+                    const weight = Math.max(0.1, 1 - age / 200); // 200ms 内线性衰减
+                    vx += s.x * weight;
+                    vy += s.y * weight;
+                    total_weight += weight;
+                }
+                if (total_weight > 0) {
+                    vx /= total_weight;
+                    vy /= total_weight;
+                }
+            }
+
+            // 转换为像素/帧（16ms 一帧），阈值：0.3 像素/帧
+            const vx_frame = vx * 16;
+            const vy_frame = vy * 16;
+            const speed = Math.sqrt(vx_frame * vx_frame + vy_frame * vy_frame);
+
+            if (speed > 0.3) {
+                this._start_inertial_scroll(vx_frame, vy_frame);
+            } else {
+                // 速度不足，直接检查可见性
+                this._check_page_visibility();
+            }
+
+            this._drag_velocity_samples = [];
             return;
         }
 
@@ -1507,7 +2034,8 @@ class DocumentReaderManager {
             eraserSizeRaw: DRAW_CONFIG.eraserSize,
             scale: 1,
             bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
-            variableWidths: null
+            variableWidths: null,
+            _cache_uid: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         };
 
         this.current_pressure = 0.5;
@@ -1565,7 +2093,9 @@ class DocumentReaderManager {
                     strokeHistoryRef: page.stroke_history,
                     redrawFn: () => this._render_all_strokes(stroke_bounds)
                 });
+                cmd.page_index = this.active_page_index;
                 await history_execute_command(cmd, false);
+                this._trim_undo_stack();
                 await this._render_all_strokes(stroke_bounds);
             }
         }
@@ -1580,9 +2110,27 @@ class DocumentReaderManager {
 
     // ====== 撤销与清空 ======
 
+    /** 裁剪全局 undo 栈至 _max_history_steps 上限 */
+    _trim_undo_stack() {
+        while (history_state.undo_list.length > this._max_history_steps) {
+            history_state.undo_list.shift();
+        }
+    }
+
     async handle_undo() {
         if (!history_validate_undo()) return;
         if (this.is_drawing) return;
+
+        // 检查栈顶命令所属页面，若与当前页不同则先切换
+        const top_cmd = history_state.undo_list[history_state.undo_list.length - 1];
+        if (top_cmd && typeof top_cmd.page_index === 'number' &&
+            top_cmd.page_index !== this.active_page_index) {
+            this.active_page_index = top_cmd.page_index;
+            this.page_manager.current_index = top_cmd.page_index;
+            await this._scroll_to_page(top_cmd.page_index);
+            this._update_page_indicator();
+            this._sync_page_buttons();
+        }
 
         await history_handle_undo();
         await this._render_all_strokes();
@@ -1610,7 +2158,9 @@ class DocumentReaderManager {
             redrawFn: () => this._render_all_strokes(),
             loadBaseImageFn: () => Promise.resolve()
         });
+        cmd.page_index = this.active_page_index;
         await history_execute_command(cmd, false);
+        this._trim_undo_stack();
 
         await this._render_all_strokes();
         this._update_button_status();
@@ -1659,6 +2209,9 @@ class DocumentReaderManager {
         this.dr_canvas_x = 0;
         this.dr_canvas_y = viewport_center_y - page_center_y * s;
         this._dr_apply_scale();
+
+        // 翻页后预渲染相邻页面
+        this._prerender_for_navigation(page_index);
     }
 
     _update_page_indicator() {
@@ -1666,6 +2219,74 @@ class DocumentReaderManager {
         if (el) {
             el.textContent = `${this.page_manager.current_index + 1} / ${this.page_manager.get_page_count()}`;
         }
+    }
+
+    /** 点击页码指示器时显示页码跳转输入框 */
+    _show_page_jump_input() {
+        const el = document.getElementById('drPageIndicator');
+        if (!el || el.querySelector('input')) return;
+
+        const max_page = this.page_manager.get_page_count();
+        const current_page = this.page_manager.current_index + 1;
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'dr-page-jump-input';
+        input.min = 1;
+        input.max = max_page;
+        input.value = current_page;
+        input.setAttribute('aria-label', '跳转页码');
+
+        el.textContent = '';
+        el.appendChild(input);
+        input.focus();
+        input.select();
+
+        let cleaned = false;
+        const cleanup = () => {
+            if (cleaned) return;
+            cleaned = true;
+            input.removeEventListener('keydown', key_handler);
+            input.removeEventListener('blur', blur_handler);
+        };
+
+        const jump_to_page = (page_num) => {
+            cleanup();
+            const index = page_num - 1;
+            if (index >= 0 && index < max_page) {
+                this.page_manager.current_index = index;
+                this.active_page_index = index;
+                this._scroll_to_page(index);
+                this._sync_page_buttons();
+            }
+            this._update_page_indicator();
+        };
+
+        const key_handler = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const val = parseInt(input.value, 10);
+                if (!isNaN(val)) jump_to_page(val);
+                else this._update_page_indicator();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cleanup();
+                this._update_page_indicator();
+            }
+        };
+
+        const blur_handler = () => {
+            // 延迟执行，避免与 keydown Enter 冲突
+            setTimeout(() => {
+                if (cleaned) return;
+                const val = parseInt(input.value, 10);
+                if (!isNaN(val)) jump_to_page(val);
+                else this._update_page_indicator();
+            }, 100);
+        };
+
+        input.addEventListener('keydown', key_handler);
+        input.addEventListener('blur', blur_handler);
     }
 
     _sync_page_buttons() {
@@ -1727,7 +2348,10 @@ class DocumentReaderManager {
         const page_indicator = document.getElementById('drPageIndicator');
         if (page_indicator) {
             page_indicator.style.cursor = 'pointer';
+            // 单击 → 页面侧边栏
             page_indicator.addEventListener('click', () => this._toggle_page_sidebar());
+            // 双击 → 页码跳转输入框
+            page_indicator.addEventListener('dblclick', () => this._show_page_jump_input());
         }
 
         const move_btn = document.getElementById('drBtnMove');
@@ -1755,6 +2379,25 @@ class DocumentReaderManager {
                 window.main_show_pen_control_panel(eraser_btn, 'eraser');
             }
         });
+    }
+
+    /**
+     * 切换文本选择模式（按需创建/销毁文本层）
+     * @param {boolean} enabled - 是否启用文本选择
+     */
+    toggle_text_selection(enabled) {
+        this._text_layer_enabled = enabled;
+
+        // 为当前可见的 PDF 页面按需创建或销毁文本层
+        for (let i = 0; i < this.page_manager.pages_list.length; i++) {
+            const pd = this.page_manager.pages_list[i];
+            if (!pd || pd.render_mode !== 'pdfjs' || !pd.is_visible) continue;
+            this._create_pdf_page_layers(pd);
+            if (enabled) {
+                // 启用时重新渲染文本层
+                this._render_pdf_page_direct(i, true);
+            }
+        }
     }
 
     _set_draw_mode(mode) {
@@ -2259,10 +2902,10 @@ class DocumentReaderManager {
         this._dr_update_canvas_position();
         this._dr_sync_transform();
 
-        // 更新所有已初始化页面的 TileRenderer LOD
-        for (let i = 0; i < this.page_manager.pages_list.length; i++) {
+        // 仅遍历已初始化 tile 的页面（跳过无 tile 页面，200+ 页文档性能提升显著）
+        for (const i of this._pages_with_tiles) {
             const pd = this.page_manager.pages_list[i];
-            if (pd.tile_renderer && (pd.is_visible || this._is_page_near_active(i, this._tile_keep_distance))) {
+            if (pd && (pd.is_visible || this._is_page_near_active(i, this._tile_keep_distance))) {
                 pd.tile_renderer.update_visible_tile_dpr(s, false, true);
             }
         }
@@ -2276,7 +2919,31 @@ class DocumentReaderManager {
         this._check_page_visibility();
     }
 
-    /** 滚轮缩放（以鼠标位置为中心） */
+    /** 启用 will-change: transform（缩放/拖拽开始时调用） */
+    _dr_enable_smooth_transform() {
+        if (this._smooth_transform_timeout_id !== null) {
+            clearTimeout(this._smooth_transform_timeout_id);
+            this._smooth_transform_timeout_id = null;
+        }
+        if (this._zoom_wrapper) {
+            this._zoom_wrapper.classList.add('smooth-transform');
+        }
+    }
+
+    /** 延迟移除 will-change: transform（交互结束后 150ms 释放 GPU 资源） */
+    _dr_schedule_disable_smooth_transform() {
+        if (this._smooth_transform_timeout_id !== null) {
+            clearTimeout(this._smooth_transform_timeout_id);
+        }
+        this._smooth_transform_timeout_id = setTimeout(() => {
+            this._smooth_transform_timeout_id = null;
+            if (this._zoom_wrapper) {
+                this._zoom_wrapper.classList.remove('smooth-transform');
+            }
+        }, 150);
+    }
+
+    /** 滚轮缩放（以鼠标位置为中心，rAF 节流重计算） */
     _dr_handle_wheel(e) {
         if (!this.is_open) return;
         if (this.is_drawing) return;
@@ -2301,7 +2968,19 @@ class DocumentReaderManager {
             this.dr_canvas_x = mouse_x - (mouse_x - this.dr_canvas_x) * ratio;
             this.dr_canvas_y = mouse_y - (mouse_y - this.dr_canvas_y) * ratio;
             this.dr_scale = new_s;
-            this._dr_apply_scale();
+
+            // will-change: 按需启用 GPU 合成层
+            this._dr_enable_smooth_transform();
+
+            // rAF 节流：合并多帧滚轮事件的 _dr_apply_scale 调用
+            if (this._wheel_raf_id !== null) {
+                cancelAnimationFrame(this._wheel_raf_id);
+            }
+            this._wheel_raf_id = requestAnimationFrame(() => {
+                this._wheel_raf_id = null;
+                this._dr_apply_scale();
+                this._dr_schedule_disable_smooth_transform();
+            });
         }
     }
 
@@ -2331,6 +3010,13 @@ class DocumentReaderManager {
             this.dr_start_scale_y = (touches[0].clientY + touches[1].clientY) / 2;
             this.dr_start_canvas_x = this.dr_canvas_x;
             this.dr_start_canvas_y = this.dr_canvas_y;
+
+            // will-change: 按需启用 GPU 合成层
+            this._dr_enable_smooth_transform();
+
+            // 记录捏合起始中心（用于两指平移增量计算）
+            this._touch_start_center_x = this.dr_start_scale_x;
+            this._touch_start_center_y = this.dr_start_scale_y;
         }
     }
 
@@ -2340,21 +3026,52 @@ class DocumentReaderManager {
 
         if (touches.length === 2) {
             e.preventDefault();
-            const current_dist_sq = this._dr_calc_touch_dist_sq(touches[0], touches[1]);
-            const scale_ratio = Math.sqrt(current_dist_sq / this.dr_start_distance_sq);
-            let new_s = this.dr_start_scale * scale_ratio;
-            new_s = Math.max(this.dr_min_scale, Math.min(this.dr_max_scale, new_s));
 
-            if (new_s !== this.dr_scale) {
-                const ratio = new_s / this.dr_start_scale;
-                const center_x = (touches[0].clientX + touches[1].clientX) / 2;
-                const center_y = (touches[0].clientY + touches[1].clientY) / 2;
+            // 缓存最新触摸数据，由 rAF 回调统一处理（保证 60fps 平滑输出）
+            this._touch_pending_data = {
+                t0: { clientX: touches[0].clientX, clientY: touches[0].clientY },
+                t1: { clientX: touches[1].clientX, clientY: touches[1].clientY }
+            };
 
-                this.dr_canvas_x = center_x - (this.dr_start_scale_x - this.dr_start_canvas_x) * ratio;
-                this.dr_canvas_y = center_y - (this.dr_start_scale_y - this.dr_start_canvas_y) * ratio;
-                this.dr_scale = new_s;
-                this._dr_apply_scale();
-            }
+            if (this._touch_raf_id !== null) return;
+            this._touch_raf_id = requestAnimationFrame(() => {
+                this._touch_raf_id = null;
+                const data = this._touch_pending_data;
+                if (!data || !this.dr_is_scaling) return;
+                this._touch_pending_data = null;
+
+                const current_dist_sq = this._dr_calc_touch_dist_sq(data.t0, data.t1);
+                const scale_ratio = Math.sqrt(current_dist_sq / this.dr_start_distance_sq);
+                let new_s = this.dr_start_scale * scale_ratio;
+                new_s = Math.max(this.dr_min_scale, Math.min(this.dr_max_scale, new_s));
+
+                // 当前捏合中心点
+                const center_x = (data.t0.clientX + data.t1.clientX) / 2;
+                const center_y = (data.t0.clientY + data.t1.clientY) / 2;
+
+                if (new_s !== this.dr_scale) {
+                    const ratio = new_s / this.dr_start_scale;
+
+                    // 以起始中心为锚点计算缩放偏移，再加上中心点平移增量
+                    const pan_dx = center_x - this._touch_start_center_x;
+                    const pan_dy = center_y - this._touch_start_center_y;
+
+                    this.dr_canvas_x = this.dr_start_scale_x - (this.dr_start_scale_x - this.dr_start_canvas_x) * ratio + pan_dx;
+                    this.dr_canvas_y = this.dr_start_scale_y - (this.dr_start_scale_y - this.dr_start_canvas_y) * ratio + pan_dy;
+                    this.dr_scale = new_s;
+                    this._dr_apply_scale();
+                } else {
+                    // 纯平移（缩放未变化时也允许平移）
+                    const pan_dx = center_x - this._touch_start_center_x;
+                    const pan_dy = center_y - this._touch_start_center_y;
+                    if (Math.abs(pan_dx) > 0.5 || Math.abs(pan_dy) > 0.5) {
+                        this.dr_canvas_x = this.dr_start_canvas_x + pan_dx;
+                        this.dr_canvas_y = this.dr_start_canvas_y + pan_dy;
+                        this._dr_update_canvas_position();
+                        this._dr_sync_transform();
+                    }
+                }
+            });
         }
     }
 
@@ -2362,7 +3079,59 @@ class DocumentReaderManager {
         if (e.touches.length < 2) {
             this.dr_is_scaling = false;
             this.dr_is_dragging = false;
+
+            // 清理捏合缩放 rAF
+            if (this._touch_raf_id !== null) {
+                cancelAnimationFrame(this._touch_raf_id);
+                this._touch_raf_id = null;
+            }
+            this._touch_pending_data = null;
+
+            // will-change: 延迟释放 GPU 合成层
+            this._dr_schedule_disable_smooth_transform();
         }
+    }
+
+    /** 启动惯性滚动动画（指数衰减速度，每帧更新位置，到达边界自动停止） */
+    _start_inertial_scroll(vx, vy) {
+        // 停止已有的惯性动画
+        if (this._inertia_raf_id !== null) {
+            cancelAnimationFrame(this._inertia_raf_id);
+            this._inertia_raf_id = null;
+        }
+
+        const decay = 0.95;      // 每帧速度衰减系数
+        const min_speed = 0.5;   // 停止阈值（像素/帧）
+        let cur_vx = vx;
+        let cur_vy = vy;
+
+        const animate = () => {
+            cur_vx *= decay;
+            cur_vy *= decay;
+
+            // 速度低于阈值时停止
+            const speed = Math.sqrt(cur_vx * cur_vx + cur_vy * cur_vy);
+            if (speed < min_speed) {
+                this._inertia_raf_id = null;
+                this._check_page_visibility();
+                return;
+            }
+
+            this.dr_canvas_x += cur_vx;
+            this.dr_canvas_y += cur_vy;
+
+            // 钳制到边界（到达边界时停止对应方向的惯性）
+            const prev_x = this.dr_canvas_x;
+            const prev_y = this.dr_canvas_y;
+            this._dr_update_canvas_position();
+            if (this.dr_canvas_x !== prev_x) cur_vx = 0;
+            if (this.dr_canvas_y !== prev_y) cur_vy = 0;
+
+            this._dr_sync_transform();
+            this._inertia_raf_id = requestAnimationFrame(animate);
+        };
+
+        this._inertia_raf_id = requestAnimationFrame(animate);
     }
 
     /** 计算两点触摸距离平方 */
