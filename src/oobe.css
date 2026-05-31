@@ -629,3 +629,56 @@ body {
     font-weight: 500;
     color: var(--color-muted);
 }
+
+/* ===== 保存配置加载动画 ===== */
+.oobe-saving-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.oobe-saving-overlay.active {
+    opacity: 1;
+}
+
+.oobe-saving-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 32px 48px;
+    background: var(--color-canvas);
+    border-radius: var(--rounded-xl);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.oobe-saving-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--color-hairline);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: oobe-spin 0.8s linear infinite;
+}
+
+@keyframes oobe-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.oobe-saving-text {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-ink);
+}

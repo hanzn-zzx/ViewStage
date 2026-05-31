@@ -490,6 +490,7 @@ async function oobe_show_page4() {
 /**
  * 枚举摄像头设备并初始化选择列表和预览
  * 仅调用一次 getUserMedia，复用流做分辨率检测和预览
+ * 优化：先枚举设备，无摄像头时直接跳过 getUserMedia 避免卡顿
  */
 async function oobe_init_camera_select() {
     const cameraOptions = document.getElementById('cameraOptions');
@@ -499,19 +500,29 @@ async function oobe_init_camera_select() {
     const placeholder = document.getElementById('cameraPreviewPlaceholder');
 
     try {
-        oobe_camera_preview_stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        
+        // 先枚举设备，检查是否有视频输入设备
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(device => device.kind === 'videoinput');
 
         cameraOptions.innerHTML = '';
-        
+
+        // 无摄像头时直接跳过 getUserMedia，避免卡顿
         if (videoDevices.length === 0) {
             cameraSelected.textContent = window.i18n?.format_translate('settings.noCameraDetected') || '未检测到摄像头';
             cameraResolutionSelected.textContent = '-';
             oobe_hide_camera_settings();
             return;
         }
+
+        // 有摄像头时才请求权限并获取流
+        const stream = await Promise.race([
+            navigator.mediaDevices.getUserMedia({ video: true }),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), 5000)
+            )
+        ]);
+        
+        oobe_camera_preview_stream = stream;
 
         videoDevices.forEach((device, index) => {
             const option = document.createElement('div');
@@ -533,11 +544,11 @@ async function oobe_init_camera_select() {
         
         oobe_setup_custom_selects();
     } catch (error) {
-        console.error('摄像头检测失败:', error.name);
+        console.error('摄像头检测失败:', error.name || error.message);
         
         if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
             cameraSelected.textContent = window.i18n?.format_translate('settings.noCameraPermission') || '无摄像头权限';
-        } else if (error.name === 'NotFoundError') {
+        } else if (error.name === 'NotFoundError' || error.message === 'Timeout') {
             cameraSelected.textContent = window.i18n?.format_translate('settings.noCameraDetected') || '未检测到摄像头';
         } else {
             cameraSelected.textContent = window.i18n?.format_translate('settings.getFailed') || '获取失败';
@@ -706,14 +717,61 @@ function oobe_setup_page4_buttons() {
         const finalSettings = oobe_save_merged_settings(oobe_cached_settings);
         
         oobe_hide_camera_preview();
+        
+        // 显示保存中动画
+        oobe_show_saving_overlay();
+        
         try {
             await invoke('device_detect_all');
             await invoke('settings_save_all', { settings: finalSettings });
+            
+            // 隐藏保存中动画后显示完成页
+            oobe_hide_saving_overlay();
             oobe_show_page5();
         } catch (error) {
             console.error('保存设置失败:', error);
+            oobe_hide_saving_overlay();
         }
     });
+}
+
+/**
+ * 显示保存配置中的加载动画覆盖层
+ */
+function oobe_show_saving_overlay() {
+    const existing = document.getElementById('oobeSavingOverlay');
+    if (existing) return;
+
+    const savingText = window.i18n?.format_translate('oobe.saving') || '正在保存配置...';
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'oobeSavingOverlay';
+    overlay.className = 'oobe-saving-overlay';
+    overlay.innerHTML = `
+        <div class="oobe-saving-content">
+            <div class="oobe-saving-spinner"></div>
+            <div class="oobe-saving-text">${savingText}</div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    // 触发动画
+    requestAnimationFrame(() => {
+        overlay.classList.add('active');
+    });
+}
+
+/**
+ * 隐藏保存配置中的加载动画覆盖层
+ */
+function oobe_hide_saving_overlay() {
+    const overlay = document.getElementById('oobeSavingOverlay');
+    if (!overlay) return;
+    
+    overlay.classList.remove('active');
+    setTimeout(() => {
+        overlay.remove();
+    }, 300);
 }
 
 function oobe_show_page5() {
