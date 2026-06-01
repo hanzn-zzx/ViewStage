@@ -117,10 +117,10 @@ class RealtimeBatchDrawManager {
         this._overlayTransformY = 0;
     }
 
-    _each_tile(x1, y1, x2, y2, fn) {
+    _each_tile(x1, y1, x2, y2, fn, padding = 0) {
         const tr = this._tileRenderer || window.tileRenderer;
         if (!tr) return;
-        const infos = tr.infos_for_segment(x1, y1, x2, y2);
+        const infos = tr.infos_for_segment(x1, y1, x2, y2, padding);
         for (const info of infos) {
             const ctx = info.ctx;
             const dpr = info.dpr;
@@ -385,7 +385,8 @@ class RealtimeBatchDrawManager {
             if (cmd.type === 'erase') {
                 const tr = this._tileRenderer || window.tileRenderer;
                 if (tr) {
-                    const infos = tr.infos_for_segment(fromX, fromY, toX, toY);
+                    const halfWidth = (cmd.lineWidth || 20) / 2;
+                    const infos = tr.infos_for_segment(fromX, fromY, toX, toY, halfWidth);
                     for (const info of infos) {
                         let entry = eraseByTile.get(info.key);
                         if (!entry) {
@@ -532,6 +533,7 @@ class RealtimeBatchDrawManager {
 
         if (this._lastMidX !== null && this._lastToX !== null) {
             if (this.lastType === 'erase') {
+                const eraseHalfWidth = (this.lastLineWidth || 5) / 2;
                 this._each_tile(this._lastMidX, this._lastMidY, this._lastToX, this._lastToY, (ctx) => {
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.strokeStyle = 'rgba(0,0,0,1)';
@@ -540,7 +542,7 @@ class RealtimeBatchDrawManager {
                     ctx.moveTo(this._lastMidX, this._lastMidY);
                     ctx.lineTo(this._lastToX, this._lastToY);
                     ctx.stroke();
-                });
+                }, eraseHalfWidth);
             } else if (this._overlayCtx) {
                 const ctx = this._overlayCtx;
                 const cfg = window.DRAW_CONFIG || {};

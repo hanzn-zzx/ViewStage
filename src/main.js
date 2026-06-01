@@ -2656,8 +2656,14 @@ async function main_submit_stroke() {
             state.currentStroke.storedWidths = [...storedWidths];
         }
         
+        const halfWidth = Math.max(state.currentStroke.lineWidth || 5, state.currentStroke.eraserSize || 5) / 2;
         const strokeBounds = state.currentStroke && state.currentStroke.bounds
-            ? { ...state.currentStroke.bounds } : null;
+            ? {
+                minX: state.currentStroke.bounds.minX - halfWidth,
+                minY: state.currentStroke.bounds.minY - halfWidth,
+                maxX: state.currentStroke.bounds.maxX + halfWidth,
+                maxY: state.currentStroke.bounds.maxY + halfWidth
+            } : null;
         
         const cmd = new DrawCommand({
             stroke: state.currentStroke,

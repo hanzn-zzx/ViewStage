@@ -347,12 +347,12 @@ class TileRenderer {
         return this._tileMap.get(this.tile_key(col, row));
     }
 
-    infos_for_segment(x1, y1, x2, y2) {
+    infos_for_segment(x1, y1, x2, y2, padding = 0) {
         const { w, h } = this.get_tile_dimensions();
-        const minX = Math.min(x1, x2);
-        const maxX = Math.max(x1, x2);
-        const minY = Math.min(y1, y2);
-        const maxY = Math.max(y1, y2);
+        const minX = Math.min(x1, x2) - padding;
+        const maxX = Math.max(x1, x2) + padding;
+        const minY = Math.min(y1, y2) - padding;
+        const maxY = Math.max(y1, y2) + padding;
         const sc = Math.max(0, Math.floor(minX / w));
         const ec = Math.min(TILE_COLS - 1, Math.floor(maxX / w));
         const sr = Math.max(0, Math.floor(minY / h));
@@ -481,9 +481,11 @@ class TileRenderer {
         if (this._quadtree) {
             this._quadtree.insert(stroke);
         }
+        const halfWidth = Math.max(stroke.lineWidth || 5, stroke.eraserSize || 5) / 2;
         const infos = this.infos_for_segment(
             stroke.bounds.minX, stroke.bounds.minY,
-            stroke.bounds.maxX, stroke.bounds.maxY
+            stroke.bounds.maxX, stroke.bounds.maxY,
+            halfWidth
         );
         const uniqueKeys = new Set(infos.map(i => i.key));
         for (const info of this.tileInfos) {

@@ -1002,8 +1002,12 @@ class BlackboardManager {
 
             const page = this.page_manager.get_current_page();
             if (page) {
-                const stroke_bounds = this.current_stroke && this.current_stroke.bounds
-                    ? { ...this.current_stroke.bounds } : null;
+                const hw = Math.max(this.current_stroke.lineWidth || 5, this.current_stroke.eraserSize || 5) / 2;
+                const raw = this.current_stroke.bounds;
+                const stroke_bounds = raw ? {
+                    minX: raw.minX - hw, minY: raw.minY - hw,
+                    maxX: raw.maxX + hw, maxY: raw.maxY + hw
+                } : null;
                 const cmd = new DrawCommand({
                     stroke: this.current_stroke,
                     strokeHistoryRef: page.stroke_history,
