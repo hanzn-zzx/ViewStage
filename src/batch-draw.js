@@ -279,7 +279,7 @@ class RealtimeBatchDrawManager {
     batch_draw_create_command(type, fromX, fromY, toX, toY, color, lineWidth) {
         const idx = this.pendingCount++;
         if (idx >= this.pendingCommands.length) {
-            this.pendingCommands.push({ type, fromX, fromY, toX, toY, color, lineWidth });
+            this.pendingCommands.push({ type, fromX, fromY, toX, toY, color, lineWidth, originalLineWidth: lineWidth });
         } else {
             const cmd = this.pendingCommands[idx];
             cmd.type = type;
@@ -289,6 +289,7 @@ class RealtimeBatchDrawManager {
             cmd.toY = toY;
             cmd.color = color;
             cmd.lineWidth = lineWidth;
+            cmd.originalLineWidth = lineWidth;
         }
 
         if (this.is_adaptive && this.pendingCount === 1) {
@@ -415,6 +416,8 @@ class RealtimeBatchDrawManager {
 
             if (penEffectActive && cmd.type === 'draw') {
                 this._storedWidths.push(lineWidth);
+            } else if (cmd.type === 'erase') {
+                this._storedWidths.push(lineWidth);
             }
             lastLineWidth = lineWidth;
 
@@ -426,16 +429,16 @@ class RealtimeBatchDrawManager {
             if (cmd.type === 'erase') {
                 const tr = this._tileRenderer || window.tileRenderer;
                 if (tr) {
-                    const halfWidth = (cmd.lineWidth || 20) / 2;
+                    const halfWidth = (lineWidth || 20) / 2;
                     const infos = tr.infos_for_segment(fromX, fromY, toX, toY, halfWidth);
                     for (const info of infos) {
                         let entry = eraseByTile.get(info.key);
                         if (!entry) {
-                            entry = { paths: [], lineWidth: cmd.lineWidth };
+                            entry = { paths: [], lineWidths: [] };
                             eraseByTile.set(info.key, entry);
                         }
                         entry.paths.push({ fromX, fromY, toX, toY });
-                        entry.lineWidth = cmd.lineWidth;
+                        entry.lineWidths.push(lineWidth);
                     }
                 }
             } else if (this._overlayCtx) {
@@ -486,13 +489,25 @@ class RealtimeBatchDrawManager {
                     ctx.lineJoin = 'round';
                     ctx.globalCompositeOperation = 'destination-out';
                     ctx.strokeStyle = 'rgba(0,0,0,1)';
-                    ctx.lineWidth = entry.lineWidth;
-                    ctx.beginPath();
-                    for (const p of entry.paths) {
-                        ctx.moveTo(p.fromX, p.fromY);
-                        ctx.lineTo(p.toX, p.toY);
+                    
+                    if (entry.lineWidths && entry.lineWidths.length > 0) {
+                        for (let j = 0; j < entry.paths.length; j++) {
+                            const p = entry.paths[j];
+                            ctx.lineWidth = entry.lineWidths[j] || 20;
+                            ctx.beginPath();
+                            ctx.moveTo(p.fromX, p.fromY);
+                            ctx.lineTo(p.toX, p.toY);
+                            ctx.stroke();
+                        }
+                    } else {
+                        ctx.lineWidth = entry.lineWidth || 20;
+                        ctx.beginPath();
+                        for (const p of entry.paths) {
+                            ctx.moveTo(p.fromX, p.fromY);
+                            ctx.lineTo(p.toX, p.toY);
+                        }
+                        ctx.stroke();
                     }
-                    ctx.stroke();
                     ctx.restore();
                 }
             }

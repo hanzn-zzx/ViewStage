@@ -2003,16 +2003,21 @@ class DocumentReaderManager {
 
     _start_stroke(type) {
         const DRAW_CONFIG = window.DRAW_CONFIG;
+        const baseEraserSize = DRAW_CONFIG.eraserSize;
         this.current_stroke = {
             type: type,
             points: [],
             color: type === 'draw' ? DRAW_CONFIG.penColor : '#000000',
-            lineWidth: type === 'draw' ? DRAW_CONFIG.penWidth : DRAW_CONFIG.eraserSize,
-            eraserSize: DRAW_CONFIG.eraserSize,
+            lineWidth: type === 'draw' ? DRAW_CONFIG.penWidth : baseEraserSize,
+            eraserSize: baseEraserSize,
             eraserSizeRaw: DRAW_CONFIG.eraserSize,
+            eraserSpeedEnabled: DRAW_CONFIG.eraserSpeedEnabled,
+            eraserSpeedMinSize: DRAW_CONFIG.eraserSpeedMinSize,
+            eraserSpeedMaxSize: DRAW_CONFIG.eraserSpeedMaxSize,
+            eraserSpeedFactor: DRAW_CONFIG.eraserSpeedFactor,
             scale: 1,
             bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
-            variableWidths: null,
+            variableWidths: [],
             _cache_uid: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         };
 
@@ -2022,7 +2027,12 @@ class DocumentReaderManager {
 
         this.cached_draw_type = type;
         this.cached_draw_color = type === 'draw' ? DRAW_CONFIG.penColor : '#000000';
-        this.cached_draw_line_width = type === 'draw' ? DRAW_CONFIG.penWidth : DRAW_CONFIG.eraserSize;
+        this.cached_draw_line_width = baseEraserSize;
+
+        this._last_draw_time = performance.now();
+        this._last_draw_x = null;
+        this._last_draw_y = null;
+        this._speed_buffer = [];
 
         if (this.batch_draw) {
             this.batch_draw.batch_draw_init_start();
@@ -2043,11 +2053,40 @@ class DocumentReaderManager {
         if (from_y > bounds.maxY) bounds.maxY = from_y;
         if (to_y > bounds.maxY) bounds.maxY = to_y;
 
+        let currentWidth = stroke.lineWidth;
+
         if (stroke.type === 'draw') {
             this.current_pressure = pressure;
             this.last_line_width = this.current_line_width;
-            this.current_line_width = stroke.lineWidth * (0.9 + pressure * 0.2);
+            currentWidth = stroke.lineWidth * (0.9 + pressure * 0.2);
+            this.current_line_width = currentWidth;
+        } else if (stroke.type === 'erase' && stroke.eraserSpeedEnabled) {
+            const now = performance.now();
+            const dt = now - this._last_draw_time;
+
+            if (this._last_draw_x !== null && dt > 0) {
+                const dx = to_x - this._last_draw_x;
+                const dy = to_y - this._last_draw_y;
+                const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+
+                this._speed_buffer.push(speed);
+                if (this._speed_buffer.length > 5) {
+                    this._speed_buffer.shift();
+                }
+
+                const avgSpeed = this._speed_buffer.reduce((a, b) => a + b, 0) / this._speed_buffer.length;
+                const sizeRange = stroke.eraserSpeedMaxSize - stroke.eraserSpeedMinSize;
+                currentWidth = stroke.eraserSpeedMinSize + Math.min(avgSpeed * stroke.eraserSpeedFactor * 100, sizeRange);
+                currentWidth = Math.max(stroke.eraserSpeedMinSize, Math.min(stroke.eraserSpeedMaxSize, currentWidth));
+            }
+
+            this._last_draw_time = now;
+            this._last_draw_x = to_x;
+            this._last_draw_y = to_y;
+            this.cached_draw_line_width = currentWidth;
         }
+
+        stroke.variableWidths.push(currentWidth);
 
         stroke.points.push({ fromX: from_x, fromY: from_y, toX: to_x, toY: to_y });
     }

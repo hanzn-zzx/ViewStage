@@ -73,6 +73,10 @@ const DRAW_CONFIG = {
     penWidth: 5,
     penSizePresets: [2, 5, 10, 15, 21],
     eraserSize: 15,
+    eraserSpeedEnabled: true,
+    eraserSpeedMinSize: 5,
+    eraserSpeedMaxSize: 30,
+    eraserSpeedFactor: 0.5,
     minScale: 0.5,
     maxScale: 3,
     maxScaleCamera: 2,
@@ -2631,13 +2635,18 @@ function main_update_canvas_transform_smooth(targetX, targetY, targetScale, dura
 // 撤销功能 - 混合方案：路径记录 + ImageData 压缩
 function main_start_stroke(type) {
     const invScale = 1 / main_fetch_safe_scale();
+    const baseEraserSize = DRAW_CONFIG.eraserSize * invScale;
     state.currentStroke = {
         type: type,
         points: [],
         color: type === 'draw' ? DRAW_CONFIG.penColor : '#000000',
         lineWidth: (type === 'draw' ? DRAW_CONFIG.penWidth : DRAW_CONFIG.eraserSize) * invScale,
-        eraserSize: DRAW_CONFIG.eraserSize * invScale,
+        eraserSize: baseEraserSize,
         eraserSizeRaw: DRAW_CONFIG.eraserSize,
+        eraserSpeedEnabled: DRAW_CONFIG.eraserSpeedEnabled,
+        eraserSpeedMinSize: DRAW_CONFIG.eraserSpeedMinSize * invScale,
+        eraserSpeedMaxSize: DRAW_CONFIG.eraserSpeedMaxSize * invScale,
+        eraserSpeedFactor: DRAW_CONFIG.eraserSpeedFactor,
         scale: state.scale,
         bounds: {
             minX: Infinity,
@@ -2645,7 +2654,7 @@ function main_start_stroke(type) {
             maxX: -Infinity,
             maxY: -Infinity
         },
-        variableWidths: null
+        variableWidths: []
     };
     
     state.currentPressure = 0.5;
@@ -2654,7 +2663,12 @@ function main_start_stroke(type) {
     
     state.cachedDrawType = type;
     state.cachedDrawColor = type === 'draw' ? DRAW_CONFIG.penColor : '#000000';
-    state.cachedDrawLineWidth = (type === 'draw' ? DRAW_CONFIG.penWidth : DRAW_CONFIG.eraserSize) * invScale;
+    state.cachedDrawLineWidth = baseEraserSize;
+    
+    state.lastDrawTime = performance.now();
+    state.lastDrawX = null;
+    state.lastDrawY = null;
+    state.speedBuffer = [];
     
     batchDrawManager.batch_draw_init_start();
 }
@@ -2673,11 +2687,40 @@ function main_save_stroke_point(fromX, fromY, toX, toY, pressure = 0.5) {
     if (fromY > bounds.maxY) bounds.maxY = fromY;
     if (toY > bounds.maxY) bounds.maxY = toY;
     
+    let currentWidth = stroke.lineWidth;
+    
     if (stroke.type === 'draw') {
         state.currentPressure = pressure;
         state.lastLineWidth = state.currentLineWidth;
-        state.currentLineWidth = stroke.lineWidth * (0.9 + pressure * 0.2);
+        currentWidth = stroke.lineWidth * (0.9 + pressure * 0.2);
+        state.currentLineWidth = currentWidth;
+    } else if (stroke.type === 'erase' && stroke.eraserSpeedEnabled) {
+        const now = performance.now();
+        const dt = now - state.lastDrawTime;
+        
+        if (state.lastDrawX !== null && dt > 0) {
+            const dx = toX - state.lastDrawX;
+            const dy = toY - state.lastDrawY;
+            const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+            
+            state.speedBuffer.push(speed);
+            if (state.speedBuffer.length > 5) {
+                state.speedBuffer.shift();
+            }
+            
+            const avgSpeed = state.speedBuffer.reduce((a, b) => a + b, 0) / state.speedBuffer.length;
+            const sizeRange = stroke.eraserSpeedMaxSize - stroke.eraserSpeedMinSize;
+            currentWidth = stroke.eraserSpeedMinSize + Math.min(avgSpeed * stroke.eraserSpeedFactor * 100, sizeRange);
+            currentWidth = Math.max(stroke.eraserSpeedMinSize, Math.min(stroke.eraserSpeedMaxSize, currentWidth));
+        }
+        
+        state.lastDrawTime = now;
+        state.lastDrawX = toX;
+        state.lastDrawY = toY;
+        state.cachedDrawLineWidth = currentWidth;
     }
+    
+    stroke.variableWidths.push(currentWidth);
     
     const points = stroke.points;
     points.push({ fromX, fromY, toX, toY });
@@ -2851,11 +2894,12 @@ async function main_render_strokes_to_context(ctx, strokes) {
     for (const stroke of strokes) {
         if (!stroke.points || stroke.points.length < 1) continue;
 
+        const hasVariableWidths = stroke.variableWidths && stroke.variableWidths.length > 0;
+        
         if (stroke.type === 'erase') {
             main_update_context_state(ctx, {
                 globalCompositeOperation: 'destination-out',
-                strokeStyle: '#000000',
-                lineWidth: stroke.lineWidth || DRAW_CONFIG.eraserSize
+                strokeStyle: '#000000'
             });
         } else {
             main_update_context_state(ctx, {
@@ -2871,20 +2915,40 @@ async function main_render_strokes_to_context(ctx, strokes) {
             }
 
             main_update_context_state(ctx, {
-                strokeStyle: stroke.color || DRAW_CONFIG.penColor,
-                lineWidth: stroke.lineWidth || DRAW_CONFIG.penWidth
+                strokeStyle: stroke.color || DRAW_CONFIG.penColor
             });
         }
 
-        const path = new Path2D();
-        const firstPoint = stroke.points[0];
-        path.moveTo(firstPoint.fromX, firstPoint.fromY);
-        path.lineTo(firstPoint.toX, firstPoint.toY);
-        for (let i = 1; i < stroke.points.length; i++) {
-            path.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
-            path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
+        if (hasVariableWidths) {
+            for (let i = 0; i < stroke.points.length; i++) {
+                const point = stroke.points[i];
+                const lineWidth = stroke.variableWidths[i] || stroke.lineWidth || 
+                    (stroke.type === 'erase' ? DRAW_CONFIG.eraserSize : DRAW_CONFIG.penWidth);
+                
+                main_update_context_state(ctx, {
+                    lineWidth: lineWidth
+                });
+                
+                const path = new Path2D();
+                path.moveTo(point.fromX, point.fromY);
+                path.lineTo(point.toX, point.toY);
+                ctx.stroke(path);
+            }
+        } else {
+            main_update_context_state(ctx, {
+                lineWidth: stroke.lineWidth || (stroke.type === 'erase' ? DRAW_CONFIG.eraserSize : DRAW_CONFIG.penWidth)
+            });
+            
+            const path = new Path2D();
+            const firstPoint = stroke.points[0];
+            path.moveTo(firstPoint.fromX, firstPoint.fromY);
+            path.lineTo(firstPoint.toX, firstPoint.toY);
+            for (let i = 1; i < stroke.points.length; i++) {
+                path.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
+                path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
+            }
+            ctx.stroke(path);
         }
-        ctx.stroke(path);
     }
 
     main_update_context_state(ctx, {
