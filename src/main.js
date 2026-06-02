@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ViewStage 主逻辑 —— 摄像头及展台应用核心
  * 架构: 图像层(img) + 批注层(canvas)，批注系统含笔画记录/压缩/撤销，图像处理由Rust后端并行
  * 性能: RAF批量绘制减少重绘；Blob URL替代Data URL节省内存
@@ -75,8 +75,8 @@ const DRAW_CONFIG = {
     eraserSize: 15,
     eraserSpeedEnabled: true,
     eraserSpeedMinSize: 5,
-    eraserSpeedMaxSize: 80,
-    eraserSpeedFactor: 0.5,
+    eraserSpeedMaxSize: 120,
+    eraserSpeedFactor: 0.3,
     minScale: 0.5,
     maxScale: 3,
     maxScaleCamera: 2,

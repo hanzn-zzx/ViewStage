@@ -655,6 +655,10 @@ class BlackboardManager {
             const { clientX, clientY } = this._eraser_hint_pending_pos;
             this._eraser_hint_pending_pos = null;
 
+            const eraser_size = this.cached_draw_line_width || window.DRAW_CONFIG?.eraserSize || 15;
+            this._eraser_hint.style.width = eraser_size + 'px';
+            this._eraser_hint.style.height = eraser_size + 'px';
+
             const rect = this.bb_wrapper
                 ? this.bb_wrapper.parentElement.getBoundingClientRect()
                 : null;
