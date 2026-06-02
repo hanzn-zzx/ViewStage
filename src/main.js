@@ -75,7 +75,7 @@ const DRAW_CONFIG = {
     eraserSize: 15,
     eraserSpeedEnabled: true,
     eraserSpeedMinSize: 5,
-    eraserSpeedMaxSize: 30,
+    eraserSpeedMaxSize: 80,
     eraserSpeedFactor: 0.5,
     minScale: 0.5,
     maxScale: 3,
@@ -2059,22 +2059,28 @@ let eraserHintPendingPos = null;
 
 function main_update_eraser_hint_position(clientX, clientY) {
     eraserHintPendingPos = { clientX, clientY };
-    
+
     if (eraserHintRafId !== null) return;
-    
+
     eraserHintRafId = requestAnimationFrame(() => {
         eraserHintRafId = null;
         if (!eraserHintPendingPos) return;
-        
+
         const { clientX, clientY } = eraserHintPendingPos;
         eraserHintPendingPos = null;
-        
+
         const rect = main_fetch_cached_canvas_rect();
         const x = clientX - rect.left;
         const y = clientY - rect.top;
         dom.eraserHint.style.left = `${x}px`;
         dom.eraserHint.style.top = `${y}px`;
         dom.eraserHint.style.transform = 'translate(-50%, -50%)';
+
+        if (state.drawMode === 'eraser' && state.isDrawing) {
+            const hintSize = state.cachedDrawLineWidth || DRAW_CONFIG.eraserSize;
+            dom.eraserHint.style.width = `${hintSize}px`;
+            dom.eraserHint.style.height = `${hintSize}px`;
+        }
     });
 }
 
