@@ -57,16 +57,24 @@ class RealtimeBatchDrawManager {
         this.eraserShape = 'round';
     }
 
+    /**
+     * 计算覆盖层 DPR。
+     * 覆盖层是屏幕空间画布（position: fixed 覆盖视口），DPR 超过 devicePixelRatio
+     * 对显示无增益，仅浪费显存。因此以 display_dpr 作为硬上限。
+     * @param {number} scale - 当前画布缩放比例
+     * @returns {number} 覆盖层 DPR
+     */
     _calc_overlay_dpr(scale) {
         const cfg = window.DRAW_CONFIG;
         if (cfg.dynamicDprEnabled === false) return Math.min(cfg.dpr, 2);
         const baseDpr = cfg.baseDpr || window.devicePixelRatio || 1;
         const minDpr = cfg.dprMin || 1;
-        const maxDpr = Math.min(cfg.dprMax || 4, 2);
-        const step = cfg.dprStep || 0.5;
+        const step = cfg.dprStep || 0.25;
+        // 屏幕空间画布：上限为显示器物理像素密度，再多无意义
+        const display_dpr = Math.ceil(window.devicePixelRatio || 2);
         let dpr = baseDpr * scale;
-        dpr = Math.round(dpr / step) * step;
-        return Math.max(minDpr, Math.min(maxDpr, dpr));
+        dpr = Math.ceil(dpr / step) * step;
+        return Math.max(minDpr, Math.min(display_dpr, dpr));
     }
 
     update_overlay_dpr(scale, force) {

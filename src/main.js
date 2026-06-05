@@ -93,7 +93,7 @@ const DRAW_CONFIG = {
     dynamicDprEnabled: true,
     dprMin: 1,
     dprMax: 4,
-    dprStep: 0.5,
+    dprStep: 0.25,
     imageSmoothingQuality: 'high',
     baseDpr: window.devicePixelRatio || 1,
     canvasBgColor: '#2a2a2a',

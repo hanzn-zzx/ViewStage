@@ -17,6 +17,8 @@ class TileRenderer {
         this._IDLE_SHRINK_MS = 2000;
         this._strokeVersion = 0;
         this._builtStrokeVersion = -1;
+        this._strokeIndex = null;
+        this._strokeIndexVersion = -1;
 
         this._strokeHistoryRef = options?.strokeHistoryRef || null;
         this._getVisibleRectFn = options?.getVisibleRect || null;
@@ -34,6 +36,24 @@ class TileRenderer {
 
     _get_stroke_history() {
         return this._strokeHistoryRef || window.state.strokeHistory;
+    }
+
+    /**
+     * 获取 stroke 按原始顺序的索引 Map，带版本缓存。
+     * rebuild_tile 中排序需要按原始顺序，但四叉树不保证顺序，
+     * 因此建立 stroke → index 映射。缓存避免每次 tile 重建都遍历全部 strokes。
+     */
+    _get_or_build_stroke_index() {
+        const strokes = this._get_stroke_history();
+        const version = this._strokeVersion;
+        if (this._strokeIndexVersion !== version) {
+            this._strokeIndex = new Map();
+            for (let i = 0; i < strokes.length; i++) {
+                this._strokeIndex.set(strokes[i], i);
+            }
+            this._strokeIndexVersion = version;
+        }
+        return this._strokeIndex;
     }
 
     _get_canvas_w() {
@@ -78,7 +98,7 @@ class TileRenderer {
 
         if (!force && !visibleChanged) {
             const cfg = window.DRAW_CONFIG;
-            const hysteresis = (cfg.dprStep || 0.5) / Math.max(0.5, cfg.baseDpr || window.devicePixelRatio || 1);
+            const hysteresis = Math.max(0.15, (cfg.dprStep || 0.5) / Math.max(0.5, cfg.baseDpr || window.devicePixelRatio || 1));
             if (Math.abs(scale - this._lastDprUpdateScale) < hysteresis) {
                 return;
             }
@@ -182,9 +202,10 @@ class TileRenderer {
         const baseDpr = cfg.baseDpr || window.devicePixelRatio || 1;
         const minDpr = cfg.dprMin || 1;
         const maxDpr = cfg.dprMax || 4;
-        const step = cfg.dprStep || 0.5;
+        const step = cfg.dprStep || 0.25;
+        // 改用 Math.ceil 使 DPR 始终不低于原始计算值，避免向下取整导致的模糊
         let dpr = baseDpr * scale;
-        dpr = Math.round(dpr / step) * step;
+        dpr = Math.ceil(dpr / step) * step;
         return Math.max(minDpr, Math.min(maxDpr, dpr));
     }
 
@@ -395,10 +416,7 @@ class TileRenderer {
                 // 四叉树 Set 不保证插入顺序，必须按原始 strokes 顺序排序
                 // 确保橡皮擦 destination-out 在绘制 stroke 之后执行
                 if (relevant.length > 1) {
-                    const stroke_index = new Map();
-                    for (let i = 0; i < strokes.length; i++) {
-                        stroke_index.set(strokes[i], i);
-                    }
+                    const stroke_index = this._get_or_build_stroke_index();
                     relevant.sort((a, b) => stroke_index.get(a) - stroke_index.get(b));
                 }
             } else {
@@ -469,6 +487,8 @@ class TileRenderer {
         }
         this._clear_base_caches();
         this._baseCacheLoadId = 0;
+        this._strokeIndex = null;
+        this._strokeIndexVersion = -1;
         this.dirty.clear();
     }
 

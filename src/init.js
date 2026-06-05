@@ -415,14 +415,22 @@ async function main_init_all() {
                 await window.main_init_camera();
                 console.log('[init] init_camera done');
             } catch (error) {
-                console.error('[init] init_camera error:', error?.name, error?.message);
-                if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-                    await window.main_init_without_camera(window.i18n?.format_translate('camera.notDetected') || '未检测到摄像头');
-                } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    await window.main_init_without_camera(window.i18n?.format_translate('camera.noPermission') || '无摄像头权限');
+                const err_name = error?.name || '';
+                const handled_codes = ['NotFoundError', 'DevicesNotFoundError', 'NotAllowedError', 'PermissionDeniedError'];
+                if (handled_codes.includes(err_name)) {
+                    console.warn('[init] init_camera handled:', err_name, error?.message);
+                    const msg_key = (err_name === 'NotFoundError' || err_name === 'DevicesNotFoundError')
+                        ? 'camera.notDetected' : 'camera.noPermission';
+                    const fallback = (err_name === 'NotFoundError' || err_name === 'DevicesNotFoundError')
+                        ? '未检测到摄像头' : '无摄像头权限';
+                    await window.main_init_without_camera(
+                        window.i18n?.format_translate(msg_key) || fallback
+                    );
                 } else {
-                    console.error('[init] 摄像头初始化失败:', error);
-                    await window.main_init_without_camera(window.i18n?.format_translate('camera.initFailed') || '摄像头初始化失败');
+                    console.error('[init] 摄像头初始化失败:', error?.name, error?.message);
+                    await window.main_init_without_camera(
+                        window.i18n?.format_translate('camera.initFailed') || '摄像头初始化失败'
+                    );
                 }
             }
         }
