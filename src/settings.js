@@ -343,6 +343,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
 
+                function settings_update_default_dots(group) {
+                    const saved = group === 'pen'
+                        ? (settings.penWidth !== undefined ? settings.penWidth : 5)
+                        : (settings.eraserSize !== undefined ? settings.eraserSize : 15);
+                    document.querySelectorAll(`.preset-default-dot[data-default="${group}"]`).forEach(dot => {
+                        const idx = parseInt(dot.dataset.index);
+                        const input = document.getElementById((group === 'pen' ? 'penPreset' : 'eraserPreset') + idx);
+                        const val = input ? parseInt(input.value) : 0;
+                        dot.classList.toggle('active', val === saved);
+                    });
+                }
+                settings_update_default_dots('pen');
+                settings_update_default_dots('eraser');
+
                 const mirrorToggle = document.getElementById('mirrorToggle');
                 if (mirrorToggle) {
                     try {
@@ -1195,6 +1209,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
     
+    // 默认粗细选择点
+    document.querySelectorAll('.preset-default-dot').forEach(dot => {
+        dot.addEventListener('click', async () => {
+            const group = dot.dataset.default;
+            const idx = parseInt(dot.dataset.index);
+            const input = document.getElementById((group === 'pen' ? 'penPreset' : 'eraserPreset') + idx);
+            if (!input) return;
+            const val = parseInt(input.value);
+            if (isNaN(val)) return;
+            const key = group === 'pen' ? 'penWidth' : 'eraserSize';
+            document.querySelectorAll(`.preset-default-dot[data-default="${group}"]`).forEach(d => d.classList.remove('active'));
+            dot.classList.add('active');
+            await settings_save_all_local({ [key]: val });
+        });
+    });
+
     // 画笔预设粗细
     const DEFAULT_PRESETS_BIND = [2, 5, 10, 15, 21];
     function settings_read_presets_from_ui() {
@@ -1215,6 +1245,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 input.value = val;
                 const presets = settings_read_presets_from_ui();
                 await settings_save_all_local({ penSizePresets: presets });
+                settings_update_default_dots('pen');
             });
         }
     }
@@ -1227,6 +1258,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (input) input.value = defaults[i];
             }
             await settings_save_all_local({ penSizePresets: defaults });
+            settings_update_default_dots('pen');
         });
     }
 
@@ -1250,6 +1282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 input.value = val;
                 const presets = settings_read_eraser_presets_from_ui();
                 await settings_save_all_local({ eraserSizePresets: presets });
+                settings_update_default_dots('eraser');
             });
         }
     }
@@ -1262,6 +1295,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (input) input.value = defaults[i];
             }
             await settings_save_all_local({ eraserSizePresets: defaults });
+            settings_update_default_dots('eraser');
         });
     }
 

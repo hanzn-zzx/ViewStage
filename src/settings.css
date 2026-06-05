@@ -655,6 +655,25 @@ button {
     box-shadow: 0 0 0 2px var(--color-primary-active);
 }
 
+.preset-default-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--color-hairline);
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+.preset-default-dot.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.preset-default-dot:hover {
+    border-color: var(--color-primary);
+}
+
 .preset-restore-btn {
     display: inline-flex;
     align-items: center;

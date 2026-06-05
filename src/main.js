@@ -955,6 +955,15 @@ function main_setup_pdf_file_open() {
             console.log('画笔颜色已更改:', DRAW_CONFIG.penColors);
         }
         
+        if (settings.penWidth !== undefined) {
+            DRAW_CONFIG.penWidth = settings.penWidth;
+            main_build_pen_presets(DRAW_CONFIG.penSizePresets);
+        }
+        if (settings.eraserSize !== undefined) {
+            DRAW_CONFIG.eraserSize = settings.eraserSize;
+            main_build_eraser_presets(DRAW_CONFIG.eraserSizePresets);
+        }
+        
         if (settings.penSizePresets && Array.isArray(settings.penSizePresets)) {
             DRAW_CONFIG.penSizePresets = settings.penSizePresets;
             main_build_pen_presets(settings.penSizePresets);
@@ -1858,7 +1867,11 @@ function main_build_eraser_presets(presets) {
         const btn = document.createElement('button');
         btn.className = 'size-preset-btn';
         btn.dataset.value = value;
-        btn.style.setProperty('--dot-size', Math.round(value * 0.8 + 4) + 'px');
+        const maxVal = Math.max(...presets);
+        const minVal = Math.min(...presets);
+        const range = maxVal - minVal || 1;
+        const dot = 4 + (value - minVal) / range * 24;
+        btn.style.setProperty('--dot-size', Math.round(dot) + 'px');
         btn.addEventListener('click', () => {
             DRAW_CONFIG.eraserSize = value;
             container.querySelectorAll('.size-preset-btn').forEach(b => b.classList.remove('active'));

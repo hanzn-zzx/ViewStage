@@ -104,6 +104,7 @@
     "penEffectLimited": "Limited",
     "penEffectFull": "Full",
     "penColors": "Pen Colors",
+    "defaultPreset": "Default",
     "penSizePresets": "Pen Size Presets",
     "eraserSizePresets": "Eraser Size Presets",
     "restoreDefaults": "Restore Defaults",
