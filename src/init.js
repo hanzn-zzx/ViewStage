@@ -277,6 +277,15 @@ async function settings_load_camera_config() {
             if (settings.developerMode && settings.maxScaleImage !== undefined) {
                 DRAW_CONFIG.maxScaleImage = settings.maxScaleImage;
             }
+            // 仅在开发者模式下才检查并加载性能监视器
+            if (settings.developerMode && settings.perfMonitorEnabled) {
+                try {
+                    window.perfMonitor = await import('./perf-monitor.js');
+                    window.perfMonitor.perf_monitor_init();
+                } catch (e) {
+                    console.error('[init] perf monitor load error:', e);
+                }
+            }
         } catch (error) {
             console.error('加载摄像头设置失败:', error);
         }

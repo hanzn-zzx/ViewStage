@@ -8,6 +8,7 @@ async function developer_options_init() {
     const invoke = window.__TAURI__?.core?.invoke;
     let savedWidthRatio = 0.4;
     let savedMaxScale = 4;
+    let savedPerfMonitor = false;
 
     if (invoke) {
         try {
@@ -20,6 +21,7 @@ async function developer_options_init() {
             savedMaxScale = window.DRAW_CONFIG?.maxScaleImage
                 ?? s.maxScaleImage
                 ?? 4;
+            savedPerfMonitor = s.perfMonitorEnabled === true;
         } catch (_) {
             savedWidthRatio = window.DRAW_CONFIG?.penMinWidthRatio ?? 0.4;
             savedMaxScale = window.DRAW_CONFIG?.maxScaleImage ?? 4;
@@ -29,10 +31,10 @@ async function developer_options_init() {
         savedMaxScale = window.DRAW_CONFIG?.maxScaleImage ?? 4;
     }
 
-    developer_options_show_main(savedWidthRatio, savedMaxScale);
+    developer_options_show_main(savedWidthRatio, savedMaxScale, savedPerfMonitor);
 }
 
-function developer_options_show_main(currentWidthRatio, currentMaxScale) {
+function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMonitorEnabled) {
     const page = document.getElementById('pageDevOptions');
     if (!page) return;
 
@@ -70,6 +72,13 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale) {
             <span id="devGoDetection" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">→</span>
         </div>
         <div class="setting-item">
+            <span class="setting-label">性能监视器</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="devPerfMonitorToggle"${perfMonitorEnabled ? ' checked' : ''}>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+        <div class="setting-item">
             <span class="setting-label">最快速度时宽度比例</span>
             <div class="custom-select" id="devWidthRatioSelect">
                 <div class="select-selected" id="devWidthRatioSelected">${currentWidthLabel}</div>
@@ -94,6 +103,19 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale) {
     `;
 
     document.getElementById('devGoDetection')?.addEventListener('click', developer_options_show_detection);
+
+    // 性能监视器开关
+    (function setup_perf_monitor_toggle() {
+        const toggle = document.getElementById('devPerfMonitorToggle');
+        if (!toggle) return;
+        toggle.addEventListener('change', () => {
+            const enabled = toggle.checked;
+            const invoke = window.__TAURI__?.core?.invoke;
+            if (invoke) {
+                invoke('settings_save_all', { settings: { perfMonitorEnabled: enabled, developerMode: true } });
+            }
+        });
+    })();
 
     // 宽度比例选择器
     (function setup_width_ratio_select() {

@@ -1005,6 +1005,27 @@ function main_setup_pdf_file_open() {
             DRAW_CONFIG.maxScaleImage = settings.maxScaleImage;
         }
 
+        // 性能监视器动态开关（仅在开发者模式下生效）
+        if (settings.perfMonitorEnabled !== undefined && DRAW_CONFIG.developerMode) {
+            DRAW_CONFIG.perfMonitorEnabled = settings.perfMonitorEnabled;
+            if (settings.perfMonitorEnabled) {
+                if (!window.perfMonitor) {
+                    import('./perf-monitor.js').then(mod => {
+                        window.perfMonitor = mod;
+                        mod.perf_monitor_init();
+                    }).catch(e => {
+                        console.error('动态加载 perf monitor 失败:', e);
+                    });
+                } else {
+                    window.perfMonitor.perf_monitor_set_enabled(true);
+                }
+            } else {
+                if (window.perfMonitor) {
+                    window.perfMonitor.perf_monitor_set_enabled(false);
+                }
+            }
+        }
+
         if (needRestartCamera && state.isCameraOpen) {
             console.log('摄像头设置已更改，重新初始化摄像头...');
             main_update_camera_state(false).then(() => {
