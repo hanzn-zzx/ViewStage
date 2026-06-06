@@ -544,14 +544,27 @@ class RealtimeBatchDrawManager {
                     ctx.strokeStyle = 'rgba(0,0,0,1)';
                     
                     if (entry.lineWidths && entry.lineWidths.length > 0) {
-                        for (let j = 0; j < entry.paths.length; j++) {
+                        let batchWidth = entry.lineWidths[0] || 20;
+                        ctx.lineWidth = batchWidth;
+                        ctx.beginPath();
+                        ctx.moveTo(entry.paths[0].fromX, entry.paths[0].fromY);
+                        ctx.lineTo(entry.paths[0].toX, entry.paths[0].toY);
+                        for (let j = 1; j < entry.paths.length; j++) {
+                            const w = entry.lineWidths[j] || 20;
                             const p = entry.paths[j];
-                            ctx.lineWidth = entry.lineWidths[j] || 20;
-                            ctx.beginPath();
-                            ctx.moveTo(p.fromX, p.fromY);
-                            ctx.lineTo(p.toX, p.toY);
-                            ctx.stroke();
+                            if (Math.abs(w - batchWidth) >= 0.5) {
+                                ctx.stroke();
+                                batchWidth = w;
+                                ctx.lineWidth = batchWidth;
+                                ctx.beginPath();
+                                ctx.moveTo(p.fromX, p.fromY);
+                                ctx.lineTo(p.toX, p.toY);
+                            } else {
+                                ctx.moveTo(p.fromX, p.fromY);
+                                ctx.lineTo(p.toX, p.toY);
+                            }
                         }
+                        ctx.stroke();
                     } else {
                         ctx.lineWidth = entry.lineWidth || 20;
                         ctx.beginPath();

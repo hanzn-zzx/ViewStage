@@ -525,7 +525,8 @@ class TileRenderer {
             return;
         }
 
-        /* 多 tile —— 存在多 DPR 时回退到逐个 tile 直接渲染 */
+        /* 多 tile —— 同 DPR 前提下用 offscreen canvas 预渲染后 blit */
+        /* 注：不存在多显示器混合 DPR 场景，无需对 DPR 分组 */
         const mainDpr = infos[0].dpr;
         if (infos.some(i => i.dpr !== mainDpr)) {
             for (const info of this.tileInfos) {

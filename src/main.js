@@ -3145,6 +3145,7 @@ window.main_update_context_state = main_update_context_state;
 
 /**
  * 按原始顺序逐个绘制笔画：draw/comment 用 source-over，erase 用 destination-out
+ * 优化：可变宽度段按线宽分组合并连续段到同一条路径，减少 stroke() 调用
  * @param {CanvasRenderingContext2D} ctx
  * @param {Array} strokes - 笔画数组
  */
@@ -3159,15 +3160,33 @@ async function main_render_strokes_to_context(ctx, strokes) {
     });
 
     let currentEraserShape = 'round';
-
     const pen_effect = get_pen_effect_mode();
+
+    /* 批处理状态：合并连续同色/同线宽段到一条路径 */
+    let batchActive = false;
+    let batchColor = null;
+    let batchLineWidth = 0;
+    let batchIsErase = false;
+    let batchPrevToX = 0;
+    let batchPrevToY = 0;
+
+    const batch_flush = () => {
+        if (batchActive) {
+            ctx.stroke();
+            batchActive = false;
+        }
+    };
 
     for (const stroke of strokes) {
         if (!stroke.points || stroke.points.length < 1) continue;
 
         const hasVariableWidths = stroke.variableWidths && stroke.variableWidths.length > 0;
-        
+        const strokeColor = stroke.color || DRAW_CONFIG.penColor;
+        const baseLineWidth = stroke.lineWidth || (stroke.type === 'erase' ? DRAW_CONFIG.eraserSize : DRAW_CONFIG.penWidth);
+
         if (stroke.type === 'erase') {
+            /* 擦除与前一批绘制颜色不同，先刷出绘制批 */
+            batch_flush();
             main_update_context_state(ctx, {
                 globalCompositeOperation: 'destination-out',
                 strokeStyle: '#000000'
@@ -3181,11 +3200,15 @@ async function main_render_strokes_to_context(ctx, strokes) {
                 });
             }
         } else {
+            /* 上一个是擦除 → 刷出，切回绘制 */
+            if (batchIsErase) batch_flush();
             main_update_context_state(ctx, {
                 globalCompositeOperation: 'source-over'
             });
 
             if (pen_effect !== 'off' && stroke.type === 'draw') {
+                /* 笔锋路径：不参与批处理，刷出前批后单独渲染 */
+                batch_flush();
                 const tessellated = realPenManager.build_tessellated_stroke(stroke, pen_effect);
                 if (tessellated) {
                     realPenManager.render_tessellated_stroke(ctx, tessellated);
@@ -3194,31 +3217,53 @@ async function main_render_strokes_to_context(ctx, strokes) {
             }
 
             main_update_context_state(ctx, {
-                strokeStyle: stroke.color || DRAW_CONFIG.penColor
+                strokeStyle: strokeColor
             });
+            batchColor = strokeColor;
+            batchIsErase = false;
         }
 
         if (hasVariableWidths) {
+            /* 可变宽度：分段渲染，连续线宽相近的段合并到同一条路径减少 stroke() */
+            batch_flush();
+            let varBatchActive = false;
+            let varBatchWidth = 0;
+            let lastToX = 0, lastToY = 0;
+
             for (let i = 0; i < stroke.points.length; i++) {
                 const point = stroke.points[i];
-                const lineWidth = stroke.variableWidths[i] || stroke.lineWidth || 
-                    (stroke.type === 'erase' ? DRAW_CONFIG.eraserSize : DRAW_CONFIG.penWidth);
-                
-                main_update_context_state(ctx, {
-                    lineWidth: lineWidth
-                });
-                
-                /* 避免 new Path2D() 每段分配临时对象 */
-                ctx.beginPath();
-                ctx.moveTo(point.fromX, point.fromY);
-                ctx.lineTo(point.toX, point.toY);
-                ctx.stroke();
+                const lineWidth = stroke.variableWidths[i] || baseLineWidth;
+
+                if (!varBatchActive || Math.abs(lineWidth - varBatchWidth) >= 0.5) {
+                    if (varBatchActive) ctx.stroke();
+                    main_update_context_state(ctx, { lineWidth });
+                    varBatchWidth = lineWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(point.fromX, point.fromY);
+                    ctx.lineTo(point.toX, point.toY);
+                    varBatchActive = true;
+                } else {
+                    ctx.lineTo(point.fromX, point.fromY);
+                    ctx.lineTo(point.toX, point.toY);
+                }
+                lastToX = point.toX;
+                lastToY = point.toY;
             }
-        } else {
-            main_update_context_state(ctx, {
-                lineWidth: stroke.lineWidth || (stroke.type === 'erase' ? DRAW_CONFIG.eraserSize : DRAW_CONFIG.penWidth)
-            });
-            
+            if (varBatchActive) ctx.stroke();
+            continue;
+        }
+
+        /* 固定宽度：尝试合并连续同色/同线宽笔画到同一条 Path2D */
+        if (!batchActive ||
+            batchIsErase !== (stroke.type === 'erase') ||
+            batchColor !== strokeColor ||
+            Math.abs(baseLineWidth - batchLineWidth) >= 0.5) {
+            batch_flush();
+            main_update_context_state(ctx, { lineWidth: baseLineWidth });
+            batchLineWidth = baseLineWidth;
+            batchColor = strokeColor;
+            batchIsErase = (stroke.type === 'erase');
+
             const path = new Path2D();
             const firstPoint = stroke.points[0];
             path.moveTo(firstPoint.fromX, firstPoint.fromY);
@@ -3228,8 +3273,25 @@ async function main_render_strokes_to_context(ctx, strokes) {
                 path.lineTo(stroke.points[i].toX, stroke.points[i].toY);
             }
             ctx.stroke(path);
+        } else {
+            /* 与上一笔画样式一致：利用 canvas 路径累积延迟 stroke()，合并笔段 */
+            if (!batchActive) {
+                batchActive = true;
+                ctx.beginPath();
+                ctx.moveTo(batchPrevToX, batchPrevToY);
+            }
+            ctx.moveTo(batchPrevToX, batchPrevToY);
+            for (let i = 0; i < stroke.points.length; i++) {
+                ctx.lineTo(stroke.points[i].fromX, stroke.points[i].fromY);
+                ctx.lineTo(stroke.points[i].toX, stroke.points[i].toY);
+            }
         }
+        const lastPoint = stroke.points[stroke.points.length - 1];
+        batchPrevToX = lastPoint.toX;
+        batchPrevToY = lastPoint.toY;
     }
+
+    batch_flush();
 
     main_update_context_state(ctx, {
         globalCompositeOperation: 'source-over',
