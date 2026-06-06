@@ -515,9 +515,7 @@ class TileRenderer {
                 const dpr = info.dpr;
                 ctx.save();
                 ctx.setTransform(dpr, 0, 0, dpr, -rect.x * dpr, -rect.y * dpr);
-                ctx.beginPath();
-                ctx.rect(rect.x, rect.y, rect.width, rect.height);
-                ctx.clip();
+                // 无需额外 clip：canvas 尺寸即 tile 边界，自动裁切
                 window.main_render_strokes_to_context(ctx, [stroke]);
                 ctx.restore();
                 this.dirty.delete(info.key);
