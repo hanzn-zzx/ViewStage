@@ -27,6 +27,7 @@ let last_canvas_transform = { x: null, y: null, scale: null };
 let currentAnimationId = null;
 let pending_transform = null;
 let transform_raf_id = null;
+let wheel_smooth_timer_id = null;
 
 function main_update_transform_schedule(x, y, scale) {
     if (!pending_transform) {
@@ -507,7 +508,6 @@ let state = {
     isCameraReady: false,
     cameraAvailable: true,
     isMirrored: false,
-    cameraAnimationId: null,
     cameraRotation: 0,
     camera_brightness: 10,
     camera_contrast: 1.4,
@@ -962,6 +962,10 @@ function main_setup_pdf_file_open() {
         }
         if (settings.eraserSize !== undefined) {
             DRAW_CONFIG.eraserSize = settings.eraserSize;
+            main_update_eraser_hint_size();
+            if (window.blackboardManager?.drawing_engine) {
+                window.blackboardManager.drawing_engine.refresh_eraser_hint_size();
+            }
             main_build_eraser_presets(DRAW_CONFIG.eraserSizePresets);
         }
         
@@ -974,6 +978,9 @@ function main_setup_pdf_file_open() {
         if (settings.eraserSizePresets && Array.isArray(settings.eraserSizePresets)) {
             DRAW_CONFIG.eraserSizePresets = settings.eraserSizePresets;
             main_build_eraser_presets(settings.eraserSizePresets);
+            if (window.blackboardManager?.drawing_engine) {
+                window.blackboardManager.drawing_engine.refresh_eraser_hint_size();
+            }
             console.log('橡皮擦预设已更改:', settings.eraserSizePresets);
         }
         
@@ -1651,18 +1658,21 @@ async function main_update_mode(mode) {
                 if (dom.btnMove) dom.btnMove.classList.add('primary-btn');
                 if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'grab';
                 bb.drawing_engine?._hide_eraser_hint();
+                main_update_camera_frame_rate(null);
                 break;
             case 'comment':
                 if (dom.btnComment) dom.btnComment.classList.add('primary-btn');
                 if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'crosshair';
                 bb.drawing_engine?._hide_eraser_hint();
                 main_update_pen_style();
+                main_update_camera_frame_rate(15);
                 break;
             case 'eraser':
                 if (dom.btnEraser) dom.btnEraser.classList.add('primary-btn');
                 if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'none';
                 bb.drawing_engine?._show_eraser_hint();
                 main_update_eraser_style();
+                main_update_camera_frame_rate(15);
                 break;
         }
 
@@ -1695,6 +1705,7 @@ async function main_update_mode(mode) {
             dom.btnMove.classList.add('primary-btn');
             dom.canvasWrapper.style.cursor = 'grab';
             main_hide_eraser_hint();
+            main_update_camera_frame_rate(null);
             break;
         case 'comment':
             dom.btnComment.classList.add('primary-btn');
@@ -1702,6 +1713,7 @@ async function main_update_mode(mode) {
             dom.canvasWrapper.style.cursor = 'crosshair';
             main_hide_eraser_hint();
             main_update_pen_style();
+            main_update_camera_frame_rate(15);
             break;
         case 'eraser':
             dom.btnEraser.classList.add('primary-btn');
@@ -1709,6 +1721,7 @@ async function main_update_mode(mode) {
             dom.canvasWrapper.style.cursor = 'none';
             main_show_eraser_hint();
             main_update_eraser_style();
+            main_update_camera_frame_rate(15);
             break;
     }
     
@@ -1924,6 +1937,9 @@ function main_build_eraser_presets(presets) {
             btn.classList.add('active');
             dom.eraserSizeValue.textContent = `${value}px`;
             main_update_eraser_hint_size();
+            if (window.blackboardManager?.drawing_engine) {
+                window.blackboardManager.drawing_engine.refresh_eraser_hint_size();
+            }
             if (state.drawMode === 'eraser') {
                 main_update_eraser_style();
             }
@@ -2573,9 +2589,7 @@ function main_handle_wheel(e) {
         const mouseX = e.clientX - containerRect.left;
         const mouseY = e.clientY - containerRect.top;
         
-        const oldScale = state.scale;
-        
-        const scaleRatio = newScale / oldScale;
+        const scaleRatio = newScale / state.scale;
         const targetX = mouseX - (mouseX - state.canvasX) * scaleRatio;
         const targetY = mouseY - (mouseY - state.canvasY) * scaleRatio;
         
@@ -2585,10 +2599,18 @@ function main_handle_wheel(e) {
         
         main_update_move_bound();
         main_update_canvas_position();
-        main_update_canvas_transform_smooth(state.canvasX, state.canvasY, state.scale, 200);
+        // 连续缩放用 RAF 直写 transform，避免 CSS transition 每 tick 重算
+        main_update_transform_schedule(state.canvasX, state.canvasY, state.scale);
         
         main_update_eraser_hint_size();
         if (window.tileRenderer) window.tileRenderer.mark_all();
+        
+        // wheel 滚动停稳后缓动归位，防抖 150ms
+        if (wheel_smooth_timer_id !== null) clearTimeout(wheel_smooth_timer_id);
+        wheel_smooth_timer_id = setTimeout(() => {
+            wheel_smooth_timer_id = null;
+            main_update_canvas_transform_smooth(state.canvasX, state.canvasY, state.scale, 150);
+        }, 150);
     }
 }
 
@@ -4611,11 +4633,6 @@ async function main_update_camera_state(open, options = {}) {
         }
     } else {
         // 关闭摄像头
-        if (state.cameraAnimationId) {
-            cancelAnimationFrame(state.cameraAnimationId);
-            state.cameraAnimationId = null;
-        }
-        
         if (state.cameraStream) {
             state.cameraStream.getTracks().forEach(track => track.stop());
             state.cameraStream = null;
@@ -5088,6 +5105,22 @@ async function main_save_camera_image() {
     img.onerror = () => {
         console.error('加载拍摄的图片失败');
     };
+}
+
+/**
+ * 批注模式下动态降低摄像头帧率，减少 GPU/解码占用。
+ * 使用 MediaStreamTrack.applyConstraints 在线调整，无需重启流。
+ * @param {number|null} idealFps - 目标帧率（null 表示移除帧率限制）
+ */
+function main_update_camera_frame_rate(idealFps) {
+    if (!state.cameraStream) return;
+    const track = state.cameraStream.getVideoTracks()[0];
+    if (!track) return;
+
+    const constraints = idealFps !== null
+        ? { frameRate: { ideal: idealFps } }
+        : { frameRate: { ideal: 30 } };
+    track.applyConstraints(constraints).catch(() => {});
 }
 
 async function main_format_blob_to_data_url(blob) {

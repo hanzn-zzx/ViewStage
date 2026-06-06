@@ -606,6 +606,18 @@ export class DrawingEngine {
         });
     }
 
+    /**
+     * 外部切换橡皮擦尺寸后立即刷新提示大小和缓存。
+     * 由 main_build_eraser_presets 在点击预设按钮时调用。
+     */
+    refresh_eraser_hint_size() {
+        if (!this._eraser_hint) return;
+        const size = window.DRAW_CONFIG?.eraserSize || 15;
+        this.cached_draw_line_width = size;
+        this._eraser_hint.style.width = size + 'px';
+        this._eraser_hint.style.height = size + 'px';
+    }
+
     // ====== 手掌擦除 ======
 
     _show_palm_eraser_hint() {
