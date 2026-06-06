@@ -15,6 +15,11 @@ let perf_fps_line = null;
 let perf_batch_line = null;
 let perf_tiles_line = null;
 
+// 缓存上一次文本，值未变时跳过 textContent 写操作避免无效 paint
+let perf_prev_line1 = '';
+let perf_prev_line2 = '';
+let perf_prev_line3 = '';
+
 const PERF_UPDATE_MS = 200;
 
 /** 创建监视器 DOM 并启动定时器 */
@@ -38,6 +43,7 @@ function perf_monitor_init() {
         pointer-events: none;
         user-select: none;
         white-space: pre;
+        contain: paint layout style;
     `;
 
     perf_fps_line = document.createElement('div');
@@ -108,14 +114,22 @@ function perf_monitor_refresh_display() {
     // 行 1：FPS + 渲染压力 + 实际 tile DPR（随缩放动态变化）
     const tileDpr = tileR?.tileInfos?.[0]?.dpr ?? window.DRAW_CONFIG?.dpr ?? 1;
     const dprStr = tileDpr.toFixed(1);
-    perf_fps_line.textContent = `FPS ${fpsValue}  P ${pressure.label}(${pressure.value}%)  DPR ${dprStr}`;
+    const line1 = `FPS ${fpsValue}  P ${pressure.label}(${pressure.value}%)  DPR ${dprStr}`;
+    if (line1 !== perf_prev_line1) {
+        perf_fps_line.textContent = line1;
+        perf_prev_line1 = line1;
+    }
 
     // 行 2：batch_draw 引擎指标
+    let line2;
     if (s) {
-        perf_batch_line.textContent =
-            `Bat ${s.currentFps}/${s.targetFps}  P ${s.pendingCount}  D ${s.avgDrawTime.toFixed(1)}ms  ${s.frameRateMode}`;
+        line2 = `Bat ${s.currentFps}/${s.targetFps}  P ${s.pendingCount}  D ${s.avgDrawTime.toFixed(1)}ms  ${s.frameRateMode}`;
     } else {
-        perf_batch_line.textContent = 'Bat  --';
+        line2 = 'Bat  --';
+    }
+    if (line2 !== perf_prev_line2) {
+        perf_batch_line.textContent = line2;
+        perf_prev_line2 = line2;
     }
 
     // 行 3：脏 tile + 堆内存
@@ -124,7 +138,11 @@ function perf_monitor_refresh_display() {
     const heapStr = mem
         ? `${(mem.usedJSHeapSize / 1048576).toFixed(0)}MB`
         : '--';
-    perf_tiles_line.textContent = `Til ${dirtyCount}/${totalTiles}  Heap ${heapStr}`;
+    const line3 = `Til ${dirtyCount}/${totalTiles}  Heap ${heapStr}`;
+    if (line3 !== perf_prev_line3) {
+        perf_tiles_line.textContent = line3;
+        perf_prev_line3 = line3;
+    }
 }
 
 /**
