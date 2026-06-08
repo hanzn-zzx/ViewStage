@@ -1361,7 +1361,9 @@ fn config_fetch_default() -> serde_json::Value {
         "penEffectMode": "limited",
         "memreductCleanEnabled": true,
         "developerMode": false,
-        "penMinWidthRatio": 0.2
+        "penMinWidthRatio": 0.2,
+        "lastOpenDoc": null,
+        "restoreLastDoc": true
     })
 }
 

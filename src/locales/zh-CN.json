@@ -121,6 +121,7 @@
     "defaultRotation": "默认旋转角度",
     "pdfDefaultOpen": "PDF 默认打开方式",
     "wordDefaultOpen": "Word 文档默认打开方式",
+    "restoreLastDoc": "恢复上次文档状态",
     "setDefault": "设置为默认",
     "setSetting": "设置中...",
     "setDefaultManual": "部分关联已注册，请在系统设置中手动设置默认程序",

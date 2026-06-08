@@ -121,6 +121,7 @@
     "defaultRotation": "Default Rotation",
     "pdfDefaultOpen": "Default PDF Open",
     "wordDefaultOpen": "Default Word Open",
+    "restoreLastDoc": "Restore Last Document State",
     "setDefault": "Set as default",
     "setSetting": "Setting...",
     "setDefaultManual": "Associations registered. Please set the default program manually in system settings",

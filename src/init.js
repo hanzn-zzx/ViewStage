@@ -472,6 +472,24 @@ async function main_init_all() {
                 console.log('[init] 关闭启动界面失败:', e);
             }
         }
+
+        // 恢复上次打开的文档（延迟执行，确保主窗口已完全加载）
+        if (window.documentReaderManager) {
+            setTimeout(() => {
+                // 检查是否启用了恢复上次文档状态
+                window.__TAURI__.core.invoke('settings_fetch_all').then(result => {
+                    const settings = result?.settings;
+                    window.__restoreLastDocEnabled = settings?.restoreLastDoc !== false;
+                    if (window.__restoreLastDocEnabled) {
+                        window.documentReaderManager.restore_last_document().catch(e => {
+                            console.log('[init] 恢复上次文档失败:', e);
+                        });
+                    }
+                }).catch(e => {
+                    console.log('[init] 读取设置失败:', e);
+                });
+            }, 500);
+        }
     } catch (error) {
         console.error('初始化失败:', error);
         window.main_show_error_dialog(
@@ -559,10 +577,17 @@ if (document.readyState === 'loading') {
 document.addEventListener('beforeunload', () => {
     window.main_delete_image_blob_urls?.();
     window.main_delete_all_pdf_blob_urls?.();
+    // 如果启用了恢复上次文档状态，保存状态但不清理缓存
     if (window.documentReaderManager) {
-        window.documentReaderManager.destroy();
+        if (window.__restoreLastDocEnabled) {
+            // 保存状态到缓存和 config
+            window.documentReaderManager._save_annotations_to_cache?.();
+            window.documentReaderManager._save_last_doc_state?.();
+        } else {
+            window.documentReaderManager.destroy?.();
+            window.documentReaderManager.delete_annotation_cache_files?.();
+        }
     }
-    window.documentReaderManager?.delete_annotation_cache_files?.();
     // 清理 resize 监听器
     if (window.__handle_secondary_resize) {
         window.removeEventListener('resize', window.__handle_secondary_resize);

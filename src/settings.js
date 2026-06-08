@@ -391,6 +391,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
 
+                const restoreLastDocToggle = document.getElementById('restoreLastDocToggle');
+                if (restoreLastDocToggle) {
+                    restoreLastDocToggle.checked = settings.restoreLastDoc !== false;
+                }
+
                 const frameRateModeGroup = document.getElementById('frameRateModeGroup');
                 if (frameRateModeGroup) {
                     const mode = settings.frameRateMode || 'adaptive';
@@ -1336,6 +1341,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
                 console.error('设置镜像状态失败:', error);
             }
+        });
+    }
+
+    // 恢复上次文档状态开关
+    const restoreLastDocToggle = document.getElementById('restoreLastDocToggle');
+    if (restoreLastDocToggle) {
+        restoreLastDocToggle.addEventListener('change', async () => {
+            await settings_save_all_local({ restoreLastDoc: restoreLastDocToggle.checked });
+            window.__restoreLastDocEnabled = restoreLastDocToggle.checked;
         });
     }
 

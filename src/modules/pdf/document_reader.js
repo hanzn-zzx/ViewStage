@@ -189,7 +189,7 @@ class DocumentReaderManager {
         this._set_draw_mode('move');
 
         // 从缓存恢复批注（必须在 tiles 初始化前，_scroll_to_page 触发 _check_page_visibility 会懒 init tiles）
-        await this._load_annotations_from_cache();
+        const saved_state = await this._load_annotations_from_cache();
 
         // 窗口 resize 时同步页面布局、批注坐标与 overlay canvas 尺寸
         this._window_resize_handler = () => {
@@ -208,8 +208,29 @@ class DocumentReaderManager {
         };
         window.addEventListener('resize', this._window_resize_handler);
 
+        // 恢复上次的缩放/位置/页码，或使用传入的 page_index
+        let target_page = page_index;
+        if (saved_state && saved_state.active_page_index >= 0) {
+            target_page = saved_state.active_page_index;
+            this.dr_scale = saved_state.dr_scale;
+            this.dr_canvas_x = saved_state.dr_canvas_x;
+            this.dr_canvas_y = saved_state.dr_canvas_y;
+            this.dr_cached_inv_scale = 1 / this.dr_scale;
+        }
+
         // 滚动到初始页面（会触发 _dr_apply_scale → _check_page_visibility）
-        await this._scroll_to_page(page_index);
+        await this._scroll_to_page(target_page);
+
+        // 恢复缩放 transform（_scroll_to_page 内部会调 _dr_apply_scale，此处需重新设置）
+        if (saved_state && saved_state.active_page_index >= 0) {
+            this.dr_scale = saved_state.dr_scale;
+            this.dr_canvas_x = saved_state.dr_canvas_x;
+            this.dr_canvas_y = saved_state.dr_canvas_y;
+            this.dr_cached_inv_scale = 1 / this.dr_scale;
+            this._dr_update_move_bound();
+            this._dr_update_canvas_position();
+            this._dr_sync_transform();
+        }
 
         this.is_open = true;
 
@@ -327,6 +348,9 @@ class DocumentReaderManager {
         // 保存所有页的批注到缓存（含全局 undo/redo 历史）
         await this._save_annotations_to_cache();
 
+        // 保存最后打开的文档信息到 config（用于重启后恢复）
+        await this._save_last_doc_state();
+
         // 恢复主画面历史
         if (this.saved_history_state) {
             history_state.undo_list = this.saved_history_state.undo_list;
@@ -437,9 +461,13 @@ class DocumentReaderManager {
         };
 
         const cache_data = {
-            version: 3,
+            version: 4,
             folder_index: this.folder_index,
             file_md5: folder?.fileMd5 || null,
+            active_page_index: this.active_page_index,
+            dr_scale: this.dr_scale,
+            dr_canvas_x: this.dr_canvas_x,
+            dr_canvas_y: this.dr_canvas_y,
             pages: pages.map(p => ({
                 stroke_history: p.stroke_history
             })),
@@ -458,18 +486,18 @@ class DocumentReaderManager {
 
     /** 从缓存文件恢复所有页的批注和全局 undo/redo 历史 */
     async _load_annotations_from_cache() {
-        if (this.folder_index < 0) return;
+        if (this.folder_index < 0) return null;
         const cache_dir = window.cacheDir;
-        if (!cache_dir) return;
+        if (!cache_dir) return null;
         const cache_id = this._get_annotations_cache_id();
-        if (!cache_id) return;
+        if (!cache_id) return null;
 
         try {
             const { readTextFile } = window.__TAURI__.fs;
             const file_path = `${cache_dir}/doc_annotations_${cache_id}.json`;
             const json_str = await readTextFile(file_path);
             const cache_data = JSON.parse(json_str);
-            if (!cache_data || !cache_data.pages) return;
+            if (!cache_data || !cache_data.pages) return null;
 
             const pages = this.page_manager.pages_list;
             const len = Math.min(cache_data.pages.length, pages.length);
@@ -488,11 +516,23 @@ class DocumentReaderManager {
             if (cache_data.version >= 3 && cache_data.redo_stack) {
                 this._rebuild_history_from_cache(cache_data.redo_stack, pages, history_state.redo_list);
             }
+
+            // v4 格式：返回保存的视图状态
+            if (cache_data.version >= 4) {
+                return {
+                    active_page_index: cache_data.active_page_index ?? -1,
+                    dr_scale: cache_data.dr_scale ?? 1,
+                    dr_canvas_x: cache_data.dr_canvas_x ?? 0,
+                    dr_canvas_y: cache_data.dr_canvas_y ?? 0
+                };
+            }
+            return null;
         } catch (err) {
             // 文件不存在或解析失败 → 无缓存，忽略
             if (err && err.code !== 'ENOENT' && !err.message?.includes('No such file')) {
                 console.error('[document_reader] 恢复批注缓存失败:', err);
             }
+            return null;
         }
     }
 
@@ -543,6 +583,84 @@ class DocumentReaderManager {
             return `md5_${folder.fileMd5}`;
         }
         return this.folder_index >= 0 ? `index_${this.folder_index}` : null;
+    }
+
+    /** 保存最后打开的文档信息到 config.json（用于重启后恢复） */
+    async _save_last_doc_state() {
+        if (this.folder_index < 0) return;
+        const folder = window.state?.fileList?.[this.folder_index];
+        if (!folder) return;
+
+        const lastDoc = {
+            folder_index: this.folder_index,
+            file_name: folder.name || null,
+            file_md5: folder.fileMd5 || null,
+            page_index: this.active_page_index,
+            dr_scale: this.dr_scale,
+            dr_canvas_x: this.dr_canvas_x,
+            dr_canvas_y: this.dr_canvas_y
+        };
+
+        try {
+            if (window.__TAURI__?.core?.invoke) {
+                await window.__TAURI__.core.invoke('settings_save_all', {
+                    settings: { lastOpenDoc: lastDoc }
+                });
+            }
+        } catch (err) {
+            console.error('[document_reader] 保存最后文档状态失败:', err);
+        }
+    }
+
+    /** 从 config.json 读取最后打开的文档信息 */
+    async _load_last_doc_state() {
+        try {
+            if (window.__TAURI__?.core?.invoke) {
+                const result = await window.__TAURI__.core.invoke('settings_fetch_all');
+                return result?.settings?.lastOpenDoc || null;
+            }
+        } catch (err) {
+            console.error('[document_reader] 读取最后文档状态失败:', err);
+        }
+        return null;
+    }
+
+    /** 恢复上次打开的文档（重启后调用） */
+    async restore_last_document() {
+        const lastDoc = await this._load_last_doc_state();
+        if (!lastDoc) return false;
+
+        const { folder_index, file_md5, page_index, dr_scale, dr_canvas_x, dr_canvas_y } = lastDoc;
+
+        // 查找匹配的文件夹（优先用 md5 匹配，其次用 index）
+        let target_index = -1;
+        const fileList = window.state?.fileList;
+        if (!fileList || fileList.length === 0) return false;
+
+        if (file_md5) {
+            target_index = fileList.findIndex(f => f?.fileMd5 === file_md5);
+        }
+        if (target_index < 0 && folder_index >= 0 && folder_index < fileList.length) {
+            target_index = folder_index;
+        }
+        if (target_index < 0) return false;
+
+        // 打开文档并恢复状态
+        await this.open(target_index, page_index || 0);
+
+        // open() 内部已从缓存恢复了缩放/位置，但如果缓存不存在则使用 config 中的值
+        if (this.dr_scale === 1 && this.dr_canvas_x === 0 && this.dr_canvas_y === 0 &&
+            (dr_scale !== 1 || dr_canvas_x !== 0 || dr_canvas_y !== 0)) {
+            this.dr_scale = dr_scale || 1;
+            this.dr_canvas_x = dr_canvas_x || 0;
+            this.dr_canvas_y = dr_canvas_y || 0;
+            this.dr_cached_inv_scale = 1 / this.dr_scale;
+            this._dr_update_move_bound();
+            this._dr_update_canvas_position();
+            this._dr_sync_transform();
+        }
+
+        return true;
     }
 
     async delete_annotation_cache_files() {
