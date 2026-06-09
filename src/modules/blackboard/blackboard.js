@@ -40,7 +40,9 @@ class BlackboardManager {
             cached_inv_scale: 1,
             isPalmErasing: false,
             savedDrawMode: null,
-            palmEraserSize: 60
+            palmEraserSize: 60,
+            _last_gesture_x: 0,
+            _last_gesture_y: 0
         };
         this._cached_move_bound_scale = null;
         this._cached_visible_rect = null;
@@ -821,6 +823,8 @@ class BlackboardManager {
             s.start_canvas_y = s.canvas_y;
             this._touch_start_center_x = s.start_scale_x;
             this._touch_start_center_y = s.start_scale_y;
+            s._last_gesture_x = s.canvas_x;
+            s._last_gesture_y = s.canvas_y;
             this._touch_enable_gpu();
         }
     }
@@ -897,8 +901,17 @@ class BlackboardManager {
                     }
                 }
 
+                // 限制单帧位移，防止误触/bug 导致画面瞬移
+                const MAX_FRAME_DELTA = window.DRAW_CONFIG?.gestureFrameDelta ?? 60;
+                const dx = s.canvas_x - s._last_gesture_x;
+                const dy = s.canvas_y - s._last_gesture_y;
+                if (Math.abs(dx) > MAX_FRAME_DELTA) s.canvas_x = s._last_gesture_x + Math.sign(dx) * MAX_FRAME_DELTA;
+                if (Math.abs(dy) > MAX_FRAME_DELTA) s.canvas_y = s._last_gesture_y + Math.sign(dy) * MAX_FRAME_DELTA;
+
                 this._update_move_bound();
                 this._update_canvas_position();
+                s._last_gesture_x = s.canvas_x;
+                s._last_gesture_y = s.canvas_y;
                 this._sync_bb_transform();
             });
         }

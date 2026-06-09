@@ -11,6 +11,7 @@ async function developer_options_init() {
     let savedPerfMonitor = false;
     let savedPerfInterval = 200;
     let savedDevMode = true;
+    let savedFrameDelta = 60;
 
     if (invoke) {
         try {
@@ -26,6 +27,9 @@ async function developer_options_init() {
             savedPerfMonitor = s.perfMonitorEnabled === true;
             savedPerfInterval = s.perfMonitorInterval ?? 200;
             savedDevMode = s.developerMode !== false;
+            savedFrameDelta = window.DRAW_CONFIG?.gestureFrameDelta
+                ?? s.gestureFrameDelta
+                ?? 60;
         } catch (_) {
             savedWidthRatio = window.DRAW_CONFIG?.penMinWidthRatio ?? 0.4;
             savedMaxScale = window.DRAW_CONFIG?.maxScaleImage ?? 4;
@@ -35,7 +39,7 @@ async function developer_options_init() {
         savedMaxScale = window.DRAW_CONFIG?.maxScaleImage ?? 4;
     }
 
-    developer_options_show_main(savedWidthRatio, savedMaxScale, savedPerfMonitor, savedPerfInterval, savedDevMode);
+    developer_options_show_main(savedWidthRatio, savedMaxScale, savedPerfMonitor, savedPerfInterval, savedDevMode, savedFrameDelta);
 }
 
 const PERF_INTERVAL_OPTIONS = [
@@ -49,7 +53,7 @@ function perf_interval_label(ms) {
     return opt ? `${opt.label}（${ms}ms）` : `${ms}ms`;
 }
 
-function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMonitorEnabled, perfMonitorInterval, devModeEnabled) {
+function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMonitorEnabled, perfMonitorInterval, devModeEnabled, currentFrameDelta) {
     const page = document.getElementById('pageDevOptions');
     if (!page) return;
     const devModeOn = devModeEnabled !== false;
@@ -80,6 +84,18 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
     ];
     const currentScaleLabel = scalePresets.find(p => parseInt(p.value) === currentMaxScale)?.label
         || `${currentMaxScale}x`;
+
+    const frameDeltaPresets = [
+        { value: '10', label: '10px' },
+        { value: '30', label: '30px' },
+        { value: '60', label: '60px（默认）' },
+        { value: '100', label: '100px' },
+        { value: '200', label: '200px' },
+        { value: '500', label: '500px' },
+        { value: '1000', label: '1000px' },
+    ];
+    const currentFrameDeltaLabel = frameDeltaPresets.find(p => parseInt(p.value) === currentFrameDelta)?.label
+        || `${currentFrameDelta}px`;
 
     page.innerHTML = `
         <h2 class="page-title">开发者选项</h2>
@@ -130,6 +146,17 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 <div class="select-options" id="devMaxScaleOptions">
                     ${scalePresets.map(p => `
                         <div class="select-option${parseInt(p.value) === currentMaxScale ? ' selected' : ''}" data-value="${p.value}">${p.label}</div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">单帧手势位移上限</span>
+            <div class="custom-select" id="devFrameDeltaSelect">
+                <div class="select-selected" id="devFrameDeltaSelected">${currentFrameDeltaLabel}</div>
+                <div class="select-options" id="devFrameDeltaOptions">
+                    ${frameDeltaPresets.map(p => `
+                        <div class="select-option${parseInt(p.value) === currentFrameDelta ? ' selected' : ''}" data-value="${p.value}">${p.label}</div>
                     `).join('')}
                 </div>
             </div>
@@ -255,6 +282,38 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { maxScaleImage: v, developerMode: true } });
+                }
+            });
+        });
+    })();
+
+    // 单帧手势位移上限选择器
+    (function setup_frame_delta_select() {
+        const select = document.getElementById('devFrameDeltaSelect');
+        const selected = document.getElementById('devFrameDeltaSelected');
+        const options = document.querySelectorAll('#devFrameDeltaOptions .select-option');
+
+        if (!select || !selected) return;
+
+        selected.addEventListener('click', (e) => {
+            e.stopPropagation();
+            select.classList.toggle('open');
+        });
+
+        options.forEach(opt => {
+            opt.addEventListener('click', () => {
+                const v = parseInt(opt.dataset.value);
+                selected.textContent = opt.textContent;
+                options.forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                select.classList.remove('open');
+
+                if (window.DRAW_CONFIG) {
+                    window.DRAW_CONFIG.gestureFrameDelta = v;
+                }
+                const invoke = window.__TAURI__?.core?.invoke;
+                if (invoke) {
+                    invoke('settings_save_all', { settings: { gestureFrameDelta: v, developerMode: true } });
                 }
             });
         });

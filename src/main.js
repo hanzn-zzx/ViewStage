@@ -147,7 +147,8 @@ const DRAW_CONFIG = {
     ],
     penSmoothness: 0.8,
     penEffectMode: 'limited',
-    penMinWidthRatio: 0.4
+    penMinWidthRatio: 0.4,
+    gestureFrameDelta: 60
 };
 
 // 选中第一号颜色作为默认笔色
@@ -539,6 +540,8 @@ let state = {
     startCanvasY: 0,
     touchStartCenterX: 0,   // 双指缩放起始中心 X
     touchStartCenterY: 0,   // 双指缩放起始中心 Y
+    _lastGestureX: 0,       // 上一帧合法手势位置 X（防瞬移）
+    _lastGestureY: 0,       // 上一帧合法手势位置 Y（防瞬移）
     strokeHistory: [],
     baseImageURL: null,
     baseImageObj: null,
@@ -1055,6 +1058,9 @@ function main_setup_pdf_file_open() {
         }
         if (settings.maxScaleImage !== undefined && DRAW_CONFIG.developerMode) {
             DRAW_CONFIG.maxScaleImage = settings.maxScaleImage;
+        }
+        if (settings.gestureFrameDelta !== undefined && DRAW_CONFIG.developerMode) {
+            DRAW_CONFIG.gestureFrameDelta = settings.gestureFrameDelta;
         }
 
         // 性能监视器动态开关（仅在开发者模式下生效）
@@ -2752,6 +2758,8 @@ async function main_handle_touch_start(e) {
         state.startCanvasY = state.canvasY;
         state.touchStartCenterX = state.startScaleX;
         state.touchStartCenterY = state.startScaleY;
+        state._lastGestureX = state.canvasX;
+        state._lastGestureY = state.canvasY;
         dom.canvasWrapper.classList.add('dragging');
         // 新缩放手势开始时重置渐进更新标记
         last_tile_update_scale = state.scale;
@@ -2867,9 +2875,22 @@ function main_handle_touch_move(e) {
             }
         }
         
+        // 限制单帧位移，防止误触/bug 导致画面瞬移
+        const MAX_FRAME_DELTA = DRAW_CONFIG.gestureFrameDelta;
+        const frameDx = state.canvasX - state._lastGestureX;
+        const frameDy = state.canvasY - state._lastGestureY;
+        if (Math.abs(frameDx) > MAX_FRAME_DELTA) {
+            state.canvasX = state._lastGestureX + Math.sign(frameDx) * MAX_FRAME_DELTA;
+        }
+        if (Math.abs(frameDy) > MAX_FRAME_DELTA) {
+            state.canvasY = state._lastGestureY + Math.sign(frameDy) * MAX_FRAME_DELTA;
+        }
+
         // 缩放/平移过程中实时进行边界钳制，防止画布越界
         main_update_move_bound();
         main_update_canvas_position();
+        state._lastGestureX = state.canvasX;
+        state._lastGestureY = state.canvasY;
         
         // 标记缩放进行中，延迟 tile/overlay 批量更新
         main_set_zooming();

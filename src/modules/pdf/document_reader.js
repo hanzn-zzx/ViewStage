@@ -102,6 +102,8 @@ class DocumentReaderManager {
         this._touch_raf_id = null;               // 捏合缩放 rAF 节流 ID
         this._touch_start_center_x = 0;           // 捏合起始中心 X
         this._touch_start_center_y = 0;           // 捏合起始中心 Y
+        this._dr_last_gesture_x = 0;              // 上一帧合法手势位置 X（防瞬移）
+        this._dr_last_gesture_y = 0;              // 上一帧合法手势位置 Y（防瞬移）
 
         // 自适应 DPR（按缩放级别 + 内存压力动态降级，减少 4K 屏幕 GPU 显存占用）
         this._adaptive_dpr_enabled = true;
@@ -3420,6 +3422,8 @@ class DocumentReaderManager {
             // 记录捏合起始中心（用于两指平移增量计算）
             this._touch_start_center_x = this.dr_start_scale_x;
             this._touch_start_center_y = this.dr_start_scale_y;
+            this._dr_last_gesture_x = this.dr_canvas_x;
+            this._dr_last_gesture_y = this.dr_canvas_y;
         }
     }
 
@@ -3471,15 +3475,35 @@ class DocumentReaderManager {
                     this.dr_canvas_y = this.dr_start_scale_y - (this.dr_start_scale_y - this.dr_start_canvas_y) * ratio + pan_dy;
                     this.dr_scale = new_s;
                     this._dr_set_zooming();
+
+                    // 限制单帧位移，防止误触/bug 导致画面瞬移
+                    const MAX_FRAME_DELTA = window.DRAW_CONFIG?.gestureFrameDelta ?? 60;
+                    const dx = this.dr_canvas_x - this._dr_last_gesture_x;
+                    const dy = this.dr_canvas_y - this._dr_last_gesture_y;
+                    if (Math.abs(dx) > MAX_FRAME_DELTA) this.dr_canvas_x = this._dr_last_gesture_x + Math.sign(dx) * MAX_FRAME_DELTA;
+                    if (Math.abs(dy) > MAX_FRAME_DELTA) this.dr_canvas_y = this._dr_last_gesture_y + Math.sign(dy) * MAX_FRAME_DELTA;
+
                     this._dr_apply_scale();
+                    this._dr_last_gesture_x = this.dr_canvas_x;
+                    this._dr_last_gesture_y = this.dr_canvas_y;
                 });
             } else {
                 // 纯平移：直接处理，无延迟
                 if (Math.abs(pan_dx) > 0.5 || Math.abs(pan_dy) > 0.5) {
                     this.dr_canvas_x = this.dr_start_canvas_x + pan_dx;
                     this.dr_canvas_y = this.dr_start_canvas_y + pan_dy;
+
+                    // 限制单帧位移，防止误触/bug 导致画面瞬移
+                    const MAX_FRAME_DELTA = window.DRAW_CONFIG?.gestureFrameDelta ?? 60;
+                    const dx = this.dr_canvas_x - this._dr_last_gesture_x;
+                    const dy = this.dr_canvas_y - this._dr_last_gesture_y;
+                    if (Math.abs(dx) > MAX_FRAME_DELTA) this.dr_canvas_x = this._dr_last_gesture_x + Math.sign(dx) * MAX_FRAME_DELTA;
+                    if (Math.abs(dy) > MAX_FRAME_DELTA) this.dr_canvas_y = this._dr_last_gesture_y + Math.sign(dy) * MAX_FRAME_DELTA;
+
                     this._dr_update_canvas_position();
                     this._dr_sync_transform();
+                    this._dr_last_gesture_x = this.dr_canvas_x;
+                    this._dr_last_gesture_y = this.dr_canvas_y;
                 }
             }
         }

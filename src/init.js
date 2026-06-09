@@ -277,6 +277,9 @@ async function settings_load_camera_config() {
             if (settings.developerMode && settings.maxScaleImage !== undefined) {
                 DRAW_CONFIG.maxScaleImage = settings.maxScaleImage;
             }
+            if (settings.developerMode && settings.gestureFrameDelta !== undefined) {
+                DRAW_CONFIG.gestureFrameDelta = settings.gestureFrameDelta;
+            }
             // 仅在开发者模式下才检查并加载性能监视器
             if (settings.developerMode && settings.perfMonitorEnabled) {
                 try {
