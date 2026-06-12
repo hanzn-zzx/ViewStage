@@ -1105,12 +1105,13 @@ class BlackboardManager {
                 }
             }
             if (s.is_dragging && e.touches.length === 0) {
-            s.is_dragging = false;
-            this._touch_schedule_disable_gpu();
-            if (this.draw_mode === 'move' && (Math.abs(this._gesture_vx) > 2 || Math.abs(this._gesture_vy) > 2)) {
-                this._update_move_bound();
-                this._update_canvas_position();
-                this._start_momentum();
+                s.is_dragging = false;
+                this._touch_schedule_disable_gpu();
+                if (this.draw_mode === 'move' && (Math.abs(this._gesture_vx) > 2 || Math.abs(this._gesture_vy) > 2)) {
+                    this._update_move_bound();
+                    this._update_canvas_position();
+                    this._start_momentum();
+                }
             }
         }
         if (e.touches.length === 0) {
