@@ -45,6 +45,3 @@ example/
 
 # Theme package archives
 *.vst
-
-# Standalone memreduct C project (merged into main binary)
-memreduct/
