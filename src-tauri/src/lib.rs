@@ -3449,9 +3449,9 @@ fn filetype_delete_icons_linux() -> Result<(), String> {
     Ok(())
 }
 
-/// Windows 平台：移除注册表文件关联（ProgID、OpenWithProgids、UserChoice）并刷新图标缓存
+/// Windows 平台：移除注册表文件关联（ProgID、OpenWithProgids、UserChoice）并刷新图标缓存（同步版本）
 #[cfg(target_os = "windows")]
-async fn filetype_delete_icons_windows() -> Result<(), String> {
+fn filetype_delete_icons_windows_sync() -> Result<(), String> {
     use std::process::Command;
     use winreg::RegKey;
     use winreg::enums::*;
@@ -3462,65 +3462,56 @@ async fn filetype_delete_icons_windows() -> Result<(), String> {
     
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     
-    /// 从注册表删除指定 ProgID 及其所有子键
-    fn filetype_delete_progid(hkcu: &RegKey, prog_id: &str) -> Result<(), String> {
+    fn delete_progid(hkcu: &RegKey, prog_id: &str) -> Result<(), String> {
         let classes_path = format!("Software\\Classes\\{}", prog_id);
-        
-        if let Ok(_) = hkcu.delete_subkey_all(&classes_path) {
+        if hkcu.delete_subkey_all(&classes_path).is_ok() {
             log::info!("已删除 ProgID: {}", prog_id);
         } else {
             log::info!("ProgID {} 不存在或已删除", prog_id);
         }
-        
         Ok(())
     }
     
-    filetype_delete_progid(&hkcu, &format!("{}.pdf", app_id))?;
-    filetype_delete_progid(&hkcu, &format!("{}.docx", app_id))?;
-    filetype_delete_progid(&hkcu, &format!("{}.doc", app_id))?;
+    delete_progid(&hkcu, &format!("{}.pdf", app_id))?;
+    delete_progid(&hkcu, &format!("{}.docx", app_id))?;
+    delete_progid(&hkcu, &format!("{}.doc", app_id))?;
     
-    /// 从 OpenWithProgids 中移除指定 ProgID 关联
-    fn filetype_delete_association(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
+    fn delete_association(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
         let openwith_path = format!("Software\\Classes\\{}\\OpenWithProgids", ext);
-        
         if let Ok(openwith_key) = hkcu.open_subkey(&openwith_path) {
-            if let Ok(_) = openwith_key.delete_value(prog_id) {
+            if openwith_key.delete_value(prog_id).is_ok() {
                 log::info!("已移除 {} 的 {} 关联", ext, prog_id);
             }
         }
-        
         Ok(())
     }
     
-    filetype_delete_association(&hkcu, ".pdf", &format!("{}.pdf", app_id))?;
-    filetype_delete_association(&hkcu, ".docx", &format!("{}.docx", app_id))?;
-    filetype_delete_association(&hkcu, ".doc", &format!("{}.doc", app_id))?;
+    delete_association(&hkcu, ".pdf", &format!("{}.pdf", app_id))?;
+    delete_association(&hkcu, ".docx", &format!("{}.docx", app_id))?;
+    delete_association(&hkcu, ".doc", &format!("{}.doc", app_id))?;
     
-    /// 删除 UserChoice 注册表项恢复系统默认
-    fn filetype_delete_user_choice(hkcu: &RegKey, ext: &str) -> Result<(), String> {
+    fn delete_user_choice(hkcu: &RegKey, ext: &str) -> Result<(), String> {
         let user_choice_path = format!(
             "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\{}\\UserChoice",
             ext
         );
-        
-        if let Ok(_) = hkcu.delete_subkey_all(&user_choice_path) {
+        if hkcu.delete_subkey_all(&user_choice_path).is_ok() {
             log::info!("已移除 {} 的 UserChoice 设置", ext);
         } else {
             log::info!("{} 的 UserChoice 不存在或已删除", ext);
         }
-        
         Ok(())
     }
     
-    filetype_delete_user_choice(&hkcu, ".pdf")?;
-    filetype_delete_user_choice(&hkcu, ".docx")?;
-    filetype_delete_user_choice(&hkcu, ".doc")?;
+    delete_user_choice(&hkcu, ".pdf")?;
+    delete_user_choice(&hkcu, ".docx")?;
+    delete_user_choice(&hkcu, ".doc")?;
     
     let ps_script = r#"
         $code = @'
         [DllImport("shell32.dll")]
         public static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
-'@
+        '@
         Add-Type -MemberDefinition $code -Name Shell -Namespace WinAPI
         [WinAPI.Shell]::SHChangeNotify(0x8000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)
         Write-Host "图标缓存已刷新"
@@ -3538,6 +3529,51 @@ async fn filetype_delete_icons_windows() -> Result<(), String> {
     
     log::info!("文件关联移除完成");
     Ok(())
+}
+
+/// Windows 平台：移除注册表文件关联（异步版本，供 Tauri IPC 调用）
+#[cfg(target_os = "windows")]
+async fn filetype_delete_icons_windows() -> Result<(), String> {
+    filetype_delete_icons_windows_sync()
+}
+
+/// 卸载清理：移除文件关联注册表 + 删除计划任务
+/// 如果检测到 ViewStage-upgrading 标记文件（表示正在升级），则跳过清理
+/// 标记文件超过 5 分钟视为过期失效（升级中途崩溃残留），仍执行清理
+#[cfg(target_os = "windows")]
+pub fn uninstall_cleanup_perform() -> i32 {
+    let marker = std::env::temp_dir().join("ViewStage-upgrading");
+    if marker.exists() {
+        let is_fresh = std::fs::metadata(&marker)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d.as_secs() < 300)
+            .unwrap_or(false);
+        if is_fresh {
+            log::info!("卸载清理: 检测到升级标记文件（5分钟内），跳过清理");
+            let _ = std::fs::remove_file(&marker);
+            return 0;
+        }
+        log::info!("卸载清理: 升级标记文件已过期（>5分钟），视为升级中断残留，执行清理");
+        let _ = std::fs::remove_file(&marker);
+    }
+    
+    log::info!("卸载清理: 开始清理文件关联注册表");
+    if let Err(e) = filetype_delete_icons_windows_sync() {
+        log::warn!("卸载清理: 文件关联清理失败: {}", e);
+    } else {
+        log::info!("卸载清理: 文件关联清理完成");
+    }
+    
+    log::info!("卸载清理: 开始移除计划任务 ViewStage_MemClean");
+    if let Err(e) = memhelper_task_delete() {
+        log::warn!("卸载清理: 移除计划任务失败: {}", e);
+    } else {
+        log::info!("卸载清理: 计划任务已移除");
+    }
+    
+    0
 }
 // ==================== 内存清理核心函数 ====================
 

@@ -44,6 +44,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "installerHooks": "./installer-hooks.nsh",
+        "languages": ["SimpChinese", "English"]
+      }
+    },
     "icon": [
       "icons/Square1024x1024Logo.png",
       "icons/Square1024x1024Logo.png",
