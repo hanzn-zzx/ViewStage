@@ -1715,6 +1715,10 @@ function main_setup_gesture_system() {
             state.lastX = (ev.position.x - state.drawCanvasRect.left) * state.cachedInvScale;
             state.lastY = (ev.position.y - state.drawCanvasRect.top) * state.cachedInvScale;
             main_start_stroke(state.drawMode === 'eraser' ? 'erase' : 'draw');
+            if (state.drawMode === 'eraser') {
+                main_show_eraser_hint();
+                main_update_eraser_hint_position(ev.position.x, ev.position.y);
+            }
         }
     });
 
@@ -1785,6 +1789,7 @@ function main_setup_gesture_system() {
             main_flush_last_segment(ev.position.x, ev.position.y);
             main_hide_drawing_mode();
             await main_submit_stroke();
+            if (state.drawMode === 'eraser') main_hide_eraser_hint();
         }
         dom.canvasWrapper.classList.remove('dragging');
     });
@@ -2128,8 +2133,7 @@ async function main_update_mode(mode) {
                 break;
             case 'eraser':
                 if (dom.btnEraser) dom.btnEraser.classList.add('primary-btn');
-                if (bb.bb_wrapper) bb.bb_wrapper.style.cursor = 'none';
-                bb.drawing_engine?._show_eraser_hint();
+                bb.drawing_engine?.set_draw_mode(mode);
                 main_update_eraser_style();
                 main_update_camera_frame_rate(15);
                 break;
@@ -2156,7 +2160,7 @@ async function main_update_mode(mode) {
         btn.classList.remove('primary-btn');
     });
     
-    dom.canvasWrapper.classList.remove('drawing', 'eraser', 'dragging');
+    dom.canvasWrapper.classList.remove('drawing', 'dragging');
     
     state.drawMode = mode;
     
@@ -2177,9 +2181,6 @@ async function main_update_mode(mode) {
             break;
         case 'eraser':
             dom.btnEraser.classList.add('primary-btn');
-            dom.canvasWrapper.classList.add('eraser');
-            dom.canvasWrapper.style.cursor = 'none';
-            main_show_eraser_hint();
             main_update_eraser_style();
             main_update_camera_frame_rate(15);
             break;
@@ -2644,7 +2645,8 @@ function main_update_eraser_hint_position(clientX, clientY) {
         dom.eraserHint.style.transform = 'translate(-50%, -50%)';
 
         if (state.drawMode === 'eraser' && state.isDrawing) {
-            const hintSize = state.cachedDrawLineWidth || DRAW_CONFIG.eraserSize;
+            const scale = state.scale || 1;
+            const hintSize = (state.cachedDrawLineWidth || DRAW_CONFIG.eraserSize) * scale;
             dom.eraserHint.style.width = `${hintSize}px`;
             dom.eraserHint.style.height = `${hintSize}px`;
         }
@@ -2674,8 +2676,9 @@ function main_update_palm_eraser_hint(clientX, clientY, size) {
     const rect = main_fetch_cached_canvas_rect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
-    dom.palmEraserHint.style.width = `${size}px`;
-    dom.palmEraserHint.style.height = `${size}px`;
+    const visualSize = size * main_fetch_safe_scale();
+    dom.palmEraserHint.style.width = `${visualSize}px`;
+    dom.palmEraserHint.style.height = `${visualSize}px`;
     dom.palmEraserHint.style.left = `${x}px`;
     dom.palmEraserHint.style.top = `${y}px`;
     dom.palmEraserHint.style.transform = 'translate(-50%, -50%)';

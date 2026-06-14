@@ -699,6 +699,13 @@ class DocumentReaderManager {
             this._dr_update_move_bound();
             this._dr_update_canvas_position();
             this._dr_sync_transform();
+            // 恢复缩放后同步瓦片 DPR，否则已初始化的瓦片仍使用缩放=1 时的 DPR
+            for (const i of this._pages_with_tiles) {
+                const pd = this.page_manager.pages_list[i];
+                if (pd?.tile_renderer) {
+                    pd.tile_renderer.update_visible_tile_dpr(this.dr_scale, false, true);
+                }
+            }
         }
 
         return true;
@@ -1856,7 +1863,7 @@ class DocumentReaderManager {
             skipBaseCache: true
         });
 
-        tile_renderer.init_tiles(tiles_container, 1);
+        tile_renderer.init_tiles(tiles_container, this.dr_scale || 1);
         page_data.tile_renderer = tile_renderer;
         page_data.is_tiles_initialized = true;
         this._pages_with_tiles.add(page_index);
@@ -2185,6 +2192,10 @@ class DocumentReaderManager {
                 this.last_y = (ev.position.y - rect.top) * inv;
                 this._ensure_page_tiles(this.active_page_index);
                 this._start_stroke(this.draw_mode === 'comment' ? 'draw' : 'erase');
+                if (this.draw_mode === 'eraser') {
+                    this._show_eraser_hint();
+                    this._update_eraser_hint_position(ev.position.x, ev.position.y);
+                }
             }
         });
 
@@ -2266,6 +2277,7 @@ class DocumentReaderManager {
             if (!this.is_drawing) return;
             this.is_drawing = false;
             this.draw_canvas_rect = null;
+            if (this.draw_mode === 'eraser') this._hide_eraser_hint();
             await this._submit_stroke();
         });
 
@@ -2593,6 +2605,10 @@ class DocumentReaderManager {
             this._ensure_page_tiles(this.active_page_index);
 
             this._start_stroke(this.draw_mode === 'comment' ? 'draw' : 'erase');
+            if (this.draw_mode === 'eraser') {
+                this._show_eraser_hint();
+                this._update_eraser_hint_position(e.clientX, e.clientY);
+            }
         }
     }
 
@@ -2686,6 +2702,7 @@ class DocumentReaderManager {
         if (!this.is_drawing) return;
         this.is_drawing = false;
         this.draw_canvas_rect = null;
+        if (this.draw_mode === 'eraser') this._hide_eraser_hint();
         await this._submit_stroke();
     }
 
@@ -2799,13 +2816,19 @@ class DocumentReaderManager {
                 if (page.tile_renderer) {
                     const tr = page.tile_renderer;
                     tr._strokeHistoryRef = page.stroke_history;
+                    const orig_scale = window.state?.scale;
+                    if (window.state) window.state.scale = this.dr_scale;
                     tr.add_stroke(this.current_stroke);
+                    if (window.state) window.state.scale = orig_scale;
                 } else if (page._tiles_deferred) {
                     // 延迟创建的 tile 在落笔后初始化
                     this._ensure_page_tiles(this.active_page_index);
                     if (page.tile_renderer) {
                         page.tile_renderer._strokeHistoryRef = page.stroke_history;
+                        const orig_scale = window.state?.scale;
+                        if (window.state) window.state.scale = this.dr_scale;
                         page.tile_renderer.add_stroke(this.current_stroke);
+                        if (window.state) window.state.scale = orig_scale;
                     }
                 }
             }
@@ -3115,9 +3138,7 @@ class DocumentReaderManager {
             this._scroll_container.style.touchAction = 'none';
         }
 
-        if (mode === 'eraser') {
-            this._show_eraser_hint();
-        } else {
+        if (mode !== 'eraser') {
             this._hide_eraser_hint();
         }
     }
@@ -3196,7 +3217,8 @@ class DocumentReaderManager {
             const pos = this._eraser_hint_pending_pos;
             this._eraser_hint_pending_pos = null;
 
-            const eraser_size = this.cached_draw_line_width || window.DRAW_CONFIG?.eraserSize || 15;
+            const scale = Math.max(0.001, this.dr_scale || 1);
+            const eraser_size = (this.cached_draw_line_width || window.DRAW_CONFIG?.eraserSize || 15) * scale;
             this._eraser_hint.style.width = eraser_size + 'px';
             this._eraser_hint.style.height = eraser_size + 'px';
 
@@ -3229,8 +3251,9 @@ class DocumentReaderManager {
         const rect = this._scroll_container.getBoundingClientRect();
         const x = clientX - rect.left;
         const y = clientY - rect.top;
-        this._palm_eraser_hint.style.width = size + 'px';
-        this._palm_eraser_hint.style.height = size + 'px';
+        const visualSize = size * Math.max(0.001, this.dr_scale || 1);
+        this._palm_eraser_hint.style.width = visualSize + 'px';
+        this._palm_eraser_hint.style.height = visualSize + 'px';
         this._palm_eraser_hint.style.left = x + 'px';
         this._palm_eraser_hint.style.top = y + 'px';
         this._palm_eraser_hint.style.transform = 'translate(-50%, -50%)';

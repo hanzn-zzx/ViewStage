@@ -3252,7 +3252,7 @@ async fn filetype_set_icons_windows(app: tauri::AppHandle) -> Result<(), String>
     let resource_dir = app.path().resource_dir()
         .map_err(|e| format!("获取资源目录失败: {}", e))?;
     
-    let pdf_icon = resource_dir.join("icons").join("PDF.ico").display().to_string();
+    let pdf_icon = resource_dir.join("icons").join("pdf.ico").display().to_string();
     let word_icon = resource_dir.join("icons").join("word.ico").display().to_string();
     
     let exe_path = std::env::current_exe()
@@ -3309,11 +3309,15 @@ async fn filetype_set_icons_windows(app: tauri::AppHandle) -> Result<(), String>
     filetype_create_progid(&classes_key, &format!("{}.docx", app_id), &word_icon, &exe_path_str, "ViewStage Word Document")?;
     filetype_create_progid(&classes_key, &format!("{}.doc", app_id), &word_icon, &exe_path_str, "ViewStage Word 97-2003 Document")?;
     
-    /// 在扩展名的 OpenWithProgids 下注册关联
+    /// 在扩展名下注册关联，设置默认值使图标生效
     fn filetype_create_association(classes_key: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
         let (ext_key, _) = classes_key
             .create_subkey(ext)
             .map_err(|e| format!("创建 {} 键失败: {}", ext, e))?;
+        
+        ext_key
+            .set_value("", &prog_id)
+            .map_err(|e| format!("设置 {} 默认值失败: {}", ext, e))?;
         
         let (openwith_key, _) = ext_key
             .create_subkey("OpenWithProgids")

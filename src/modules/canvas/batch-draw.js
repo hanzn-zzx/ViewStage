@@ -720,20 +720,7 @@ class RealtimeBatchDrawManager {
         this._sync_overlay_transform();
 
         if (this._lastMidX !== null && this._lastToX !== null) {
-            if (this.lastType === 'erase') {
-                const eraseHalfWidth = (this.lastLineWidth || 5) / 2;
-                this._each_tile(this._lastMidX, this._lastMidY, this._lastToX, this._lastToY, (ctx) => {
-                    ctx.lineCap = this.eraserShape === 'square' ? 'square' : 'round';
-                    ctx.lineJoin = this.eraserShape === 'square' ? 'miter' : 'round';
-                    ctx.globalCompositeOperation = 'destination-out';
-                    ctx.strokeStyle = 'rgba(0,0,0,1)';
-                    ctx.lineWidth = this.lastLineWidth || 5;
-                    ctx.beginPath();
-                    ctx.moveTo(this._lastMidX, this._lastMidY);
-                    ctx.lineTo(this._lastToX, this._lastToY);
-                    ctx.stroke();
-                }, eraseHalfWidth);
-            } else if (this._overlayCtx) {
+            if (this._overlayCtx) {
                 const ctx = this._overlayCtx;
                 const cfg = window.DRAW_CONFIG || {};
                 ctx.globalCompositeOperation = 'source-over';

@@ -202,10 +202,6 @@ body {
     cursor: crosshair;
 }
 
-.canvas-wrapper.eraser {
-    cursor: none;
-}
-
 .eraser-hint {
     position: absolute;
     z-index: 9;

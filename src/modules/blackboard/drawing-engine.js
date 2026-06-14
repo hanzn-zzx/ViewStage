@@ -388,6 +388,10 @@ export class DrawingEngine {
             this.last_x = (e.clientX - this.draw_canvas_rect.left) * inv;
             this.last_y = (e.clientY - this.draw_canvas_rect.top) * inv;
             this._start_stroke(this.draw_mode === 'comment' ? 'draw' : 'erase');
+            if (this.draw_mode === 'eraser') {
+                this._show_eraser_hint();
+                this._update_eraser_hint_position(e.clientX, e.clientY);
+            }
         }
     }
 
@@ -399,7 +403,7 @@ export class DrawingEngine {
             return;
         }
 
-        if (this.draw_mode === 'eraser') {
+        if (this.draw_mode === 'eraser' && this.is_drawing) {
             this._update_eraser_hint_position(e.clientX, e.clientY);
         }
 
@@ -449,6 +453,7 @@ export class DrawingEngine {
         if (!this.is_drawing) return;
         this.is_drawing = false;
         this.draw_canvas_rect = null;
+        if (this.draw_mode === 'eraser') this._hide_eraser_hint();
         await this._submit_stroke();
     }
 
@@ -460,7 +465,7 @@ export class DrawingEngine {
 
     handle_mouse_move(e) {
         e.preventDefault();
-        if (this.draw_mode === 'eraser') {
+        if (this.draw_mode === 'eraser' && this.is_drawing) {
             this._update_eraser_hint_position(e.clientX, e.clientY);
         }
         if (this._move_state) {
@@ -562,8 +567,9 @@ export class DrawingEngine {
             const { clientX, clientY } = this._eraser_hint_pending_pos;
             this._eraser_hint_pending_pos = null;
 
-            const eraser_size = this.cached_draw_line_width
-                || window.DRAW_CONFIG?.eraserSize || 15;
+            const scale = this._fetch_safe_scale();
+            const eraser_size = (this.cached_draw_line_width
+                || window.DRAW_CONFIG?.eraserSize || 15) * scale;
             this._eraser_hint.style.width = eraser_size + 'px';
             this._eraser_hint.style.height = eraser_size + 'px';
 
