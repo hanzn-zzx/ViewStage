@@ -10,6 +10,18 @@
 
 document.addEventListener('DOMContentLoaded', async () => {
     await i18n.init_start();
+
+    // Linux平台隐藏内存清理相关UI
+    try {
+        const { invoke } = window.__TAURI__.core;
+        const platform = await invoke('app_fetch_platform');
+        if (platform === 'linux') {
+            ['btnMemClean', 'pageMemClean', 'memreductCleanItem'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+        }
+    } catch (_) {}
     
     // ==================== 自定义弹窗函数 ====================
     function settings_show_dialog(title, message, type = 'info') {
