@@ -285,7 +285,21 @@
     "regionStandbyList": "待机列表",
     "regionModifiedList": "已修改页面列表",
     "regionCombineMemory": "合并内存页面",
-    "regionRegistryCache": "注册表缓存"
+    "regionRegistryCache": "注册表缓存",
+    "statusChecking": "检测中...",
+    "statusReady": "计划任务已就绪",
+    "statusNotSetup": "未设置计划任务（首次清理时需要管理员授权）",
+    "statusError": "检测失败",
+    "statusIpcUnavailable": "IPC 不可用",
+    "cleaning": "清理中...",
+    "cleanDone": "✓ 清理完成",
+    "cleanFailed": "✗ 清理失败",
+    "settingUp": "设置中...",
+    "setupDone": "✓ 设置完成",
+    "setupFailed": "✗ 设置失败",
+    "uninstalling": "移除中...",
+    "uninstallDone": "✓ 已移除",
+    "uninstallFailed": "✗ 移除失败"
   },
   "config": {
     "recoveryTitle": "配置已恢复",

@@ -286,6 +286,20 @@
     "regionStandbyList": "待命清單",
     "regionModifiedList": "已修改頁面清單",
     "regionCombineMemory": "合併記憶體頁面",
-    "regionRegistryCache": "登錄檔快取"
+    "regionRegistryCache": "登錄檔快取",
+    "statusChecking": "檢測中...",
+    "statusReady": "排程任務已就緒",
+    "statusNotSetup": "未設定排程任務（首次清理時需要管理員授權）",
+    "statusError": "檢測失敗",
+    "statusIpcUnavailable": "IPC 不可用",
+    "cleaning": "清理中...",
+    "cleanDone": "✓ 清理完成",
+    "cleanFailed": "✗ 清理失敗",
+    "settingUp": "設定中...",
+    "setupDone": "✓ 設定完成",
+    "setupFailed": "✗ 設定失敗",
+    "uninstalling": "移除中...",
+    "uninstallDone": "✓ 已移除",
+    "uninstallFailed": "✗ 移除失敗"
   }
 }

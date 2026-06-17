@@ -285,7 +285,21 @@
     "regionStandbyList": "Standby List",
     "regionModifiedList": "Modified Page List",
     "regionCombineMemory": "Combine Memory Pages",
-    "regionRegistryCache": "Registry Cache"
+    "regionRegistryCache": "Registry Cache",
+    "statusChecking": "Checking...",
+    "statusReady": "Scheduled task ready",
+    "statusNotSetup": "Scheduled task not set up (admin rights required on first clean)",
+    "statusError": "Check failed",
+    "statusIpcUnavailable": "IPC unavailable",
+    "cleaning": "Cleaning...",
+    "cleanDone": "✓ Cleanup complete",
+    "cleanFailed": "✗ Cleanup failed",
+    "settingUp": "Setting up...",
+    "setupDone": "✓ Setup complete",
+    "setupFailed": "✗ Setup failed",
+    "uninstalling": "Removing...",
+    "uninstallDone": "✓ Removed",
+    "uninstallFailed": "✗ Removal failed"
   },
   "config": {
     "recoveryTitle": "Settings Recovered",

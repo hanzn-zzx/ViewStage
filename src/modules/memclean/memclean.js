@@ -60,8 +60,7 @@ function _memclean_build_region_ui(regions) {
     cb.type = 'checkbox';
     cb.dataset.bit = r.bit;
     const span = document.createElement('span');
-    span.dataset.i18n = r.key;
-    span.textContent = r.key;
+    span.textContent = window.i18n.format_translate(r.key);
     label.appendChild(cb);
     label.appendChild(span);
     container.appendChild(label);
@@ -79,30 +78,30 @@ async function memclean_refresh() {
 
   if (!_memclean_invoke) {
     if (dot) dot.className = 'memclean-status-dot error';
-    if (text) text.textContent = 'IPC 不可用';
+    if (text) text.textContent = window.i18n.format_translate('memclean.statusIpcUnavailable');
     return;
   }
 
   dot.className = 'memclean-status-dot inactive';
-  text.textContent = '检测中...';
+  text.textContent = window.i18n.format_translate('memclean.statusChecking');
 
   try {
     const enabled = await _memclean_invoke('memreduct_check_skipuac');
 
     if (enabled) {
       dot.className = 'memclean-status-dot active';
-      text.textContent = '计划任务已就绪';
+      text.textContent = window.i18n.format_translate('memclean.statusReady');
       if (setupRow) setupRow.style.display = 'none';
       if (uninstallRow) uninstallRow.style.display = '';
     } else {
       dot.className = 'memclean-status-dot inactive';
-      text.textContent = '未设置计划任务（首次清理时需要管理员授权）';
+      text.textContent = window.i18n.format_translate('memclean.statusNotSetup');
       if (setupRow) setupRow.style.display = '';
       if (uninstallRow) uninstallRow.style.display = 'none';
     }
   } catch {
     dot.className = 'memclean-status-dot error';
-    text.textContent = '检测失败';
+    text.textContent = window.i18n.format_translate('memclean.statusError');
   }
 }
 
@@ -110,15 +109,15 @@ async function _memclean_do_clean() {
   const btn = _mqs('memcleanCleanBtn');
   if (!btn || !_memclean_invoke) return;
   btn.disabled = true;
-  btn.textContent = '清理中...';
+  btn.textContent = window.i18n.format_translate('memclean.cleaning');
   try {
     const mask = _memclean_recompute_mask();
     await _memclean_invoke('memreduct_clean_now', { mask });
-    btn.textContent = '✓ 清理完成';
-    setTimeout(() => { btn.textContent = '立即清理'; btn.disabled = false; }, 2500);
+    btn.textContent = window.i18n.format_translate('memclean.cleanDone');
+    setTimeout(() => { btn.textContent = window.i18n.format_translate('memclean.cleanNow'); btn.disabled = false; }, 2500);
   } catch {
-    btn.textContent = '✗ 清理失败';
-    setTimeout(() => { btn.textContent = '立即清理'; btn.disabled = false; }, 3000);
+    btn.textContent = window.i18n.format_translate('memclean.cleanFailed');
+    setTimeout(() => { btn.textContent = window.i18n.format_translate('memclean.cleanNow'); btn.disabled = false; }, 3000);
   }
 }
 
@@ -126,14 +125,14 @@ async function _memclean_do_setup() {
   const btn = _mqs('memcleanSetupBtn');
   if (!btn || !_memclean_invoke) return;
   btn.disabled = true;
-  btn.textContent = '设置中...';
+  btn.textContent = window.i18n.format_translate('memclean.settingUp');
   try {
     await _memclean_invoke('memreduct_setup');
-    btn.textContent = '✓ 设置完成';
+    btn.textContent = window.i18n.format_translate('memclean.setupDone');
     await memclean_refresh();
-    setTimeout(() => { btn.textContent = '设置计划任务'; btn.disabled = false; }, 2500);
+    setTimeout(() => { btn.textContent = window.i18n.format_translate('memclean.setupTask'); btn.disabled = false; }, 2500);
   } catch {
-    btn.textContent = '✗ 设置失败';
+    btn.textContent = window.i18n.format_translate('memclean.setupFailed');
     btn.disabled = false;
   }
 }
@@ -142,14 +141,14 @@ async function _memclean_do_uninstall() {
   const btn = _mqs('memcleanUninstallBtn');
   if (!btn || !_memclean_invoke) return;
   btn.disabled = true;
-  btn.textContent = '移除中...';
+  btn.textContent = window.i18n.format_translate('memclean.uninstalling');
   try {
     await _memclean_invoke('memreduct_uninstall');
-    btn.textContent = '✓ 已移除';
+    btn.textContent = window.i18n.format_translate('memclean.uninstallDone');
     await memclean_refresh();
-    setTimeout(() => { btn.textContent = '移除计划任务'; btn.disabled = false; }, 2500);
+    setTimeout(() => { btn.textContent = window.i18n.format_translate('memclean.uninstallTask'); btn.disabled = false; }, 2500);
   } catch {
-    btn.textContent = '✗ 移除失败';
+    btn.textContent = window.i18n.format_translate('memclean.uninstallFailed');
     btn.disabled = false;
   }
 }
