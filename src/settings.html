@@ -49,10 +49,6 @@
                 <span class="btn-icon"><img data-icon="about" width="16" height="16"></span>
                 <span class="btn-text" data-i18n="settings.about">关于</span>
             </button>
-            <button class="sidebar-btn" id="btnMemClean">
-                <span class="btn-icon"><img data-icon="gear-wide-connected" width="16" height="16"></span>
-                <span class="btn-text" data-i18n="memclean.title">内存清理</span>
-            </button>
             <button class="sidebar-btn" id="btnDevOptions" style="display:none;">
                 <span class="btn-icon"><img data-icon="gear" width="16" height="16"></span>
                 <span class="btn-text" data-i18n="developer.title">开发者选项</span>
@@ -86,16 +82,6 @@
                             <input type="checkbox" id="blackboardEnabledToggle" checked>
                             <span class="toggle-slider"></span>
                         </label>
-                    </div>
-                    <div class="setting-item flex-start" id="memreductCleanItem">
-                        <span class="setting-label" data-i18n="settings.memreductClean">内存自动清理</span>
-                        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="memreductCleanToggle">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="setting-hint" id="memreductCleanHint" data-i18n="settings.memreductCleanHint" style="text-align:right;"></span>
-                        </div>
                     </div>
                     <div class="setting-item">
                         <button class="btn-reset" id="btnReset" data-i18n="settings.resetApp">重置应用</button>
@@ -487,26 +473,6 @@
                 </div>
                 
                 <div class="page" id="pageDevOptions"></div>
-                
-                <div class="page" id="pageMemClean">
-                    <div class="memclean-status" id="memcleanStatusRow">
-                        <span class="memclean-status-dot inactive" id="memcleanStatusDot"></span>
-                        <span class="memclean-status-text" id="memcleanStatusText" data-i18n="memclean.statusChecking">...</span>
-                    </div>
-                    <h3 class="memclean-section-title" data-i18n="memclean.regionHeader">清理范围</h3>
-                    <div class="memclean-regions" id="memcleanRegions"></div>
-                    <hr class="memclean-divider">
-                    <div class="memclean-btn-row">
-                        <button class="btn-action" id="memcleanCleanBtn" data-i18n="memclean.cleanNow">立即清理</button>
-                        <div id="memcleanSetupRow">
-                            <button class="btn-action" id="memcleanSetupBtn" data-i18n="memclean.setupTask">设置计划任务</button>
-                        </div>
-                        <div id="memcleanUninstallRow" style="display:none;">
-                            <button class="btn-action" id="memcleanUninstallBtn" style="color:var(--color-muted,#888);border-color:rgba(128,128,128,0.2);font-size:12px;padding:6px 14px;" data-i18n="memclean.uninstallTask">移除计划任务</button>
-                        </div>
-                    </div>
-                    <div class="memclean-hint" data-i18n="memclean.hint">设置计划任务后，后续清理不再需要管理员授权，系统会自动静默清理。</div>
-                </div>
                 
                 <div class="page" id="pageUpdate">
                     <div class="update-container">

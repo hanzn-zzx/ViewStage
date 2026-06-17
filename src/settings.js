@@ -10,18 +10,6 @@
 
 document.addEventListener('DOMContentLoaded', async () => {
     await i18n.init_start();
-
-    // Linux平台隐藏内存清理相关UI
-    try {
-        const { invoke } = window.__TAURI__.core;
-        const platform = await invoke('app_fetch_platform');
-        if (platform === 'linux') {
-            ['btnMemClean', 'pageMemClean', 'memreductCleanItem'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'none';
-            });
-        }
-    } catch (_) {}
     
     // ==================== 自定义弹窗函数 ====================
     function settings_show_dialog(title, message, type = 'info') {
@@ -481,12 +469,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const blackboardToggle = document.getElementById('blackboardEnabledToggle');
                 if (blackboardToggle) {
                     blackboardToggle.checked = blackboardEnabled;
-                }
-
-                // 内存自动清理开关（仅保存偏好，不自动创建计划任务）
-                const memreductCleanToggle = document.getElementById('memreductCleanToggle');
-                if (memreductCleanToggle) {
-                    memreductCleanToggle.checked = settings.memreductCleanEnabled !== false;
                 }
 
                 // 文档关联状态检测（功能检测）
@@ -1884,13 +1866,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // 内存自动清理开关（仅保存偏好）
-    const memreductCleanToggle = document.getElementById('memreductCleanToggle');
-    if (memreductCleanToggle) {
-        memreductCleanToggle.addEventListener('change', async () => {
-            await settings_save_all_local({ memreductCleanEnabled: memreductCleanToggle.checked });
-        });
-    }
     if (btnOpenLogDir && window.__TAURI__) {
         btnOpenLogDir.addEventListener('click', async () => {
             try {
@@ -2094,8 +2069,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 'btnCanvas': 'pageCanvas',
                 'btnSource': 'pageSource',
                 'btnTheme': 'pageTheme',
-                'btnAbout': 'pageAbout',
-                'btnMemClean': 'pageMemClean'
+                'btnAbout': 'pageAbout'
             };
             
             const pageId = pageMap[btn.id];
@@ -2104,25 +2078,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
     });
-
-    // 内存清理页面：首次加载时动态引入模块
-    let memclean_loaded = false;
-    const memcleanBtn = document.getElementById('btnMemClean');
-    if (memcleanBtn) {
-        memcleanBtn.addEventListener('click', () => {
-            if (!memclean_loaded) {
-                memclean_loaded = true;
-                const script = document.createElement('script');
-                script.src = './modules/memclean/memclean.js';
-                script.onload = () => {
-                    if (typeof memclean_init === 'function') {
-                        memclean_init();
-                    }
-                };
-                document.body.appendChild(script);
-            }
-        });
-    }
 
     const btnUpdate = document.getElementById('btnUpdate');
     if (btnUpdate) {

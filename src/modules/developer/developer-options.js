@@ -218,6 +218,34 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 </div>
             </div>
         </div>
+        <hr class="memclean-divider" style="margin:16px 0;">
+        <h3 class="memclean-section-title">${_tk('memclean.title')}</h3>
+        <div class="setting-item flex-start">
+            <span class="setting-label">${_tk('settings.memreductClean')}</span>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="memreductCleanToggle">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span class="setting-hint" style="text-align:right;">${_tk('settings.memreductCleanHint')}</span>
+            </div>
+        </div>
+        <div class="memclean-status" id="memcleanStatusRow">
+            <span class="memclean-status-dot inactive" id="memcleanStatusDot"></span>
+            <span class="memclean-status-text" id="memcleanStatusText">${_tk('memclean.statusChecking')}</span>
+        </div>
+        <h3 class="memclean-section-title" style="margin-top:12px;">${_tk('memclean.regionHeader')}</h3>
+        <div class="memclean-regions" id="memcleanRegions"></div>
+        <div class="memclean-btn-row">
+            <button class="btn-action" id="memcleanCleanBtn">${_tk('memclean.cleanNow')}</button>
+            <div id="memcleanSetupRow">
+                <button class="btn-action" id="memcleanSetupBtn">${_tk('memclean.setupTask')}</button>
+            </div>
+            <div id="memcleanUninstallRow" style="display:none;">
+                <button class="btn-action" id="memcleanUninstallBtn" style="color:var(--color-muted,#888);border-color:rgba(128,128,128,0.2);font-size:12px;padding:6px 14px;">${_tk('memclean.uninstallTask')}</button>
+            </div>
+        </div>
+        <div class="memclean-hint">${_tk('memclean.hint')}</div>
     `;
 
     document.getElementById('devGoDetection')?.addEventListener('click', developer_options_show_detection);
@@ -433,6 +461,35 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         });
     })();
 
+    // 内存自动清理开关
+    (function setup_memclean_toggle() {
+        const toggle = document.getElementById('memreductCleanToggle');
+        if (!toggle) return;
+        const invoke = window.__TAURI__?.core?.invoke;
+        if (invoke) {
+            invoke('settings_fetch_all').then(r => {
+                toggle.checked = r.settings?.memreductCleanEnabled !== false;
+            }).catch(() => {});
+        }
+        toggle.addEventListener('change', async () => {
+            if (invoke) {
+                await invoke('settings_save_all', { settings: { memreductCleanEnabled: toggle.checked } });
+            }
+        });
+    })();
+
+    // 动态加载 memclean 模块
+    if (!window.__memclean_loaded) {
+        window.__memclean_loaded = true;
+        const script = document.createElement('script');
+        script.src = './modules/memclean/memclean.js';
+        script.onload = () => { if (typeof memclean_init === 'function') memclean_init(); };
+        document.body.appendChild(script);
+    } else if (typeof memclean_refresh === 'function') {
+        memclean_refresh();
+    }
+}
+
 function developer_options_show_detection() {
     const page = document.getElementById('pageDevOptions');
     if (!page) return;
@@ -497,5 +554,4 @@ function developer_options_show_detection() {
                 });
         });
     });
-}
 }
