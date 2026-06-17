@@ -51,20 +51,25 @@ let savedOverlayDpr = 0;
 }
 
 const PERF_INTERVAL_OPTIONS = [
-    { value: '100', label: '快' },
-    { value: '200', label: '正常' },
-    { value: '500', label: '慢' },
+    { value: '100', i18nKey: 'developer.perfIntervalFast' },
+    { value: '200', i18nKey: 'developer.perfIntervalNormal' },
+    { value: '500', i18nKey: 'developer.perfIntervalSlow' },
 ];
 
-function perf_interval_label(ms) {
+function _tk(key) { return window.i18n?.format_translate(key) ?? key; }
+function _perf_interval_label(ms) {
     const opt = PERF_INTERVAL_OPTIONS.find(p => parseInt(p.value) === ms);
-    return opt ? `${opt.label}（${ms}ms）` : `${ms}ms`;
+    return opt ? `${_tk(opt.i18nKey)}（${ms}ms）` : `${ms}ms`;
 }
 
 function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMonitorEnabled, perfMonitorInterval, devModeEnabled, currentFrameDelta, currentTailDuration, currentOverlayDpr) {
     const page = document.getElementById('pageDevOptions');
     if (!page) return;
     const devModeOn = devModeEnabled !== false;
+
+    const _presetDefault = _tk('developer.presetDefault');
+    const _presetDisabled = _tk('developer.presetDisabled');
+    const _displayDefault = _tk('developer.displayDefault');
 
     const widthPresets = [
         { value: '0.05', label: '0.05' },
@@ -73,7 +78,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         { value: '0.2', label: '0.20' },
         { value: '0.25', label: '0.25' },
         { value: '0.3', label: '0.30' },
-        { value: '0.4', label: '0.40（默认）' },
+        { value: '0.4', label: `0.40${_presetDefault}` },
         { value: '0.5', label: '0.50' },
         { value: '0.75', label: '0.75' },
         { value: '1', label: '1.00' },
@@ -84,7 +89,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
     const scalePresets = [
         { value: '2', label: '2x' },
         { value: '3', label: '3x' },
-        { value: '4', label: '4x（默认）' },
+        { value: '4', label: `4x${_presetDefault}` },
         { value: '5', label: '5x' },
         { value: '6', label: '6x' },
         { value: '8', label: '8x' },
@@ -94,7 +99,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         || `${currentMaxScale}x`;
 
     const frameDeltaPresets = [
-        { value: '60', label: '60px（默认）' },
+        { value: '60', label: `60px${_presetDefault}` },
         { value: '100', label: '100px' },
         { value: '200', label: '200px' },
         { value: '500', label: '500px' },
@@ -104,10 +109,10 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         || `${currentFrameDelta}px`;
 
     const tailDurationPresets = [
-        { value: '0', label: '0ms（关闭）' },
+        { value: '0', label: `0ms${_presetDisabled}` },
         { value: '15', label: '15ms' },
         { value: '25', label: '25ms' },
-        { value: '30', label: '30ms（默认）' },
+        { value: '30', label: `30ms${_presetDefault}` },
         { value: '50', label: '50ms' },
         { value: '80', label: '80ms' },
         { value: '100', label: '100ms' },
@@ -118,7 +123,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         || `${currentTailDuration}ms`;
 
     const overlayDprPresets = [
-        { value: '0', label: '显示器默认' },
+        { value: '0', label: _displayDefault },
         { value: '0.5', label: '0.5x' },
         { value: '1', label: '1x' },
         { value: '1.5', label: '1.5x' },
@@ -128,38 +133,38 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         || `${currentOverlayDpr}x`;
 
     page.innerHTML = `
-        <h2 class="page-title">开发者选项</h2>
+        <h2 class="page-title">${_tk('developer.title')}</h2>
         <div class="setting-item" style="border-bottom-color:var(--color-hairline, rgba(255,255,255,0.08));">
-            <span class="setting-label">开发者模式</span>
+            <span class="setting-label">${_tk('developer.devMode')}</span>
             <label class="toggle-switch">
                 <input type="checkbox" id="devModeToggle"${devModeOn ? ' checked' : ''}>
                 <span class="toggle-slider"></span>
             </label>
         </div>
         <div class="setting-item">
-            <span class="setting-label">文档加载检测</span>
+            <span class="setting-label">${_tk('developer.docDetection')}</span>
             <span id="devGoDetection" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">→</span>
         </div>
         <div class="setting-item">
-            <span class="setting-label">性能监视器</span>
+            <span class="setting-label">${_tk('developer.perfMonitor')}</span>
             <label class="toggle-switch">
                 <input type="checkbox" id="devPerfMonitorToggle"${perfMonitorEnabled ? ' checked' : ''}>
                 <span class="toggle-slider"></span>
             </label>
         </div>
         <div class="setting-item">
-            <span class="setting-label">监视器更新频率</span>
+            <span class="setting-label">${_tk('developer.perfInterval')}</span>
             <div class="custom-select" id="devPerfIntervalSelect">
-                <div class="select-selected" id="devPerfIntervalSelected">${perf_interval_label(perfMonitorInterval)}</div>
+                <div class="select-selected" id="devPerfIntervalSelected">${_perf_interval_label(perfMonitorInterval)}</div>
                 <div class="select-options" id="devPerfIntervalOptions">
                     ${PERF_INTERVAL_OPTIONS.map(p => `
-                        <div class="select-option${parseInt(p.value) === perfMonitorInterval ? ' selected' : ''}" data-value="${p.value}">${p.label}（${p.value}ms）</div>
+                        <div class="select-option${parseInt(p.value) === perfMonitorInterval ? ' selected' : ''}" data-value="${p.value}">${_tk(p.i18nKey)}（${p.value}ms）</div>
                     `).join('')}
                 </div>
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">最快速度时宽度比例</span>
+            <span class="setting-label">${_tk('developer.widthRatio')}</span>
             <div class="custom-select" id="devWidthRatioSelect">
                 <div class="select-selected" id="devWidthRatioSelected">${currentWidthLabel}</div>
                 <div class="select-options" id="devWidthRatioOptions">
@@ -170,7 +175,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">允许缩放的最大大小</span>
+            <span class="setting-label">${_tk('developer.maxScale')}</span>
             <div class="custom-select" id="devMaxScaleSelect">
                 <div class="select-selected" id="devMaxScaleSelected">${currentScaleLabel}</div>
                 <div class="select-options" id="devMaxScaleOptions">
@@ -181,7 +186,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">单帧手势位移上限</span>
+            <span class="setting-label">${_tk('developer.frameDelta')}</span>
             <div class="custom-select" id="devFrameDeltaSelect">
                 <div class="select-selected" id="devFrameDeltaSelected">${currentFrameDeltaLabel}</div>
                 <div class="select-options" id="devFrameDeltaOptions">
@@ -192,7 +197,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">Limited收尾时长</span>
+            <span class="setting-label">${_tk('developer.tailDuration')}</span>
             <div class="custom-select" id="devTailDurationSelect">
                 <div class="select-selected" id="devTailDurationSelected">${currentTailDurationLabel}</div>
                 <div class="select-options" id="devTailDurationOptions">
@@ -203,7 +208,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">叠加层 DPR（绘制预览）</span>
+            <span class="setting-label">${_tk('developer.overlayDpr')}</span>
             <div class="custom-select" id="devOverlayDprSelect">
                 <div class="select-selected" id="devOverlayDprSelected">${currentOverlayDprLabel}</div>
                 <div class="select-options" id="devOverlayDprOptions">
@@ -434,28 +439,28 @@ function developer_options_show_detection() {
 
     page.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-            <span id="devBackToMain" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">←</span>
-            <h2 class="page-title" style="margin:0;">文档加载检测</h2>
+            <span id="devBackToMain" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">${_tk('developer.backToMain')}</span>
+            <h2 class="page-title" style="margin:0;">${_tk('developer.detectionTitle')}</h2>
         </div>
         <div class="setting-item">
-            <span class="setting-label">Microsoft Office（COM）</span>
+            <span class="setting-label">${_tk('developer.detectMsOffice')}</span>
             <div style="display:flex;align-items:center;gap:8px;">
-                <span id="devWordStatus" style="font-size:13px;color:var(--color-muted, #888);">未检测</span>
-                <button class="btn-action" data-check="word">检测</button>
+                <span id="devWordStatus" style="font-size:13px;color:var(--color-muted, #888);">${_tk('developer.notDetected')}</span>
+                <button class="btn-action" data-check="word">${_tk('developer.docDetection')}</button>
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">WPS Office（COM）</span>
+            <span class="setting-label">${_tk('developer.detectWps')}</span>
             <div style="display:flex;align-items:center;gap:8px;">
-                <span id="devWpsStatus" style="font-size:13px;color:var(--color-muted, #888);">未检测</span>
-                <button class="btn-action" data-check="wps">检测</button>
+                <span id="devWpsStatus" style="font-size:13px;color:var(--color-muted, #888);">${_tk('developer.notDetected')}</span>
+                <button class="btn-action" data-check="wps">${_tk('developer.docDetection')}</button>
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">LibreOffice（CLI）</span>
+            <span class="setting-label">${_tk('developer.detectLibreOffice')}</span>
             <div style="display:flex;align-items:center;gap:8px;">
-                <span id="devLibreStatus" style="font-size:13px;color:var(--color-muted, #888);">未检测</span>
-                <button class="btn-action" data-check="libreoffice">检测</button>
+                <span id="devLibreStatus" style="font-size:13px;color:var(--color-muted, #888);">${_tk('developer.notDetected')}</span>
+                <button class="btn-action" data-check="libreoffice">${_tk('developer.docDetection')}</button>
             </div>
         </div>
     `;
@@ -472,7 +477,7 @@ function developer_options_show_detection() {
             const statusEl = document.getElementById(statusIds[check]);
             if (!statusEl) return;
 
-            statusEl.textContent = '检测中...';
+            statusEl.textContent = _tk('developer.detecting');
             statusEl.style.color = 'var(--color-muted, #888)';
             statusEl.style.fontSize = '13px';
             statusEl.style.fontWeight = 'normal';

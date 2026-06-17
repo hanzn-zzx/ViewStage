@@ -301,6 +301,31 @@
     "uninstallDone": "✓ Removed",
     "uninstallFailed": "✗ Removal failed"
   },
+  "developer": {
+    "title": "Developer Options",
+    "devMode": "Developer Mode",
+    "docDetection": "Document Detection",
+    "perfMonitor": "Performance Monitor",
+    "perfInterval": "Monitor Update Interval",
+    "perfIntervalFast": "Fast",
+    "perfIntervalNormal": "Normal",
+    "perfIntervalSlow": "Slow",
+    "widthRatio": "Min Width Ratio at Max Speed",
+    "maxScale": "Max Zoom Scale",
+    "frameDelta": "Max Gesture Delta Per Frame",
+    "tailDuration": "Pen Tail Duration",
+    "overlayDpr": "Overlay DPR (Draw Preview)",
+    "detectionTitle": "Document Detection",
+    "detectMsOffice": "Microsoft Office (COM)",
+    "detectWps": "WPS Office (COM)",
+    "detectLibreOffice": "LibreOffice (CLI)",
+    "detecting": "Checking...",
+    "notDetected": "Not Checked",
+    "presetDefault": " (default)",
+    "presetDisabled": " (disabled)",
+    "displayDefault": "Display Default",
+    "backToMain": "←"
+  },
   "config": {
     "recoveryTitle": "Settings Recovered",
     "recoveryMessage": "The following settings were invalid and have been restored to defaults:"

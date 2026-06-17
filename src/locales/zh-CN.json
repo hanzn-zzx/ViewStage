@@ -301,6 +301,31 @@
     "uninstallDone": "✓ 已移除",
     "uninstallFailed": "✗ 移除失败"
   },
+  "developer": {
+    "title": "开发者选项",
+    "devMode": "开发者模式",
+    "docDetection": "文档加载检测",
+    "perfMonitor": "性能监视器",
+    "perfInterval": "监视器更新频率",
+    "perfIntervalFast": "快",
+    "perfIntervalNormal": "正常",
+    "perfIntervalSlow": "慢",
+    "widthRatio": "最快速度时宽度比例",
+    "maxScale": "允许缩放的最大大小",
+    "frameDelta": "单帧手势位移上限",
+    "tailDuration": "笔迹收尾时长",
+    "overlayDpr": "叠加层 DPR（绘制预览）",
+    "detectionTitle": "文档加载检测",
+    "detectMsOffice": "Microsoft Office（COM）",
+    "detectWps": "WPS Office（COM）",
+    "detectLibreOffice": "LibreOffice（CLI）",
+    "detecting": "检测中...",
+    "notDetected": "未检测",
+    "presetDefault": "（默认）",
+    "presetDisabled": "（关闭）",
+    "displayDefault": "显示器默认",
+    "backToMain": "←"
+  },
   "config": {
     "recoveryTitle": "配置已恢复",
     "recoveryMessage": "以下配置项存在异常，已自动恢复为默认值："
