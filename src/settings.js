@@ -289,6 +289,28 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (eraserPresetsItem) {
                     eraserPresetsItem.style.display = eraserSpeedEnabled ? 'none' : '';
                 }
+                const eraserSpeedRangeItem = document.getElementById('eraserSpeedRangeItem');
+                if (eraserSpeedRangeItem) {
+                    eraserSpeedRangeItem.style.display = eraserSpeedEnabled ? '' : 'none';
+                }
+                const eraserSpeedMaxRangeItem = document.getElementById('eraserSpeedMaxRangeItem');
+                if (eraserSpeedMaxRangeItem) {
+                    eraserSpeedMaxRangeItem.style.display = eraserSpeedEnabled ? '' : 'none';
+                }
+                const eraserSpeedMinInput = document.getElementById('eraserSpeedMinInput');
+                const eraserSpeedMinValue = document.getElementById('eraserSpeedMinValue');
+                if (eraserSpeedMinInput && eraserSpeedMinValue) {
+                    const minVal = settings.eraserSpeedMinSize !== undefined ? settings.eraserSpeedMinSize : 10;
+                    eraserSpeedMinInput.value = minVal;
+                    eraserSpeedMinValue.textContent = minVal;
+                }
+                const eraserSpeedMaxInput = document.getElementById('eraserSpeedMaxInput');
+                const eraserSpeedMaxValue = document.getElementById('eraserSpeedMaxValue');
+                if (eraserSpeedMaxInput && eraserSpeedMaxValue) {
+                    const maxVal = settings.eraserSpeedMaxSize !== undefined ? settings.eraserSpeedMaxSize : 120;
+                    eraserSpeedMaxInput.value = maxVal;
+                    eraserSpeedMaxValue.textContent = maxVal;
+                }
                 const momentumEnabled = settings.momentumEnabled !== undefined ? settings.momentumEnabled : false;
                 const momentumToggle = document.getElementById('momentumToggle');
                 if (momentumToggle) {
@@ -981,12 +1003,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (eraserSpeedToggle) {
         eraserSpeedToggle.addEventListener('change', async () => {
             await settings_save_all_local({ eraserSpeedEnabled: eraserSpeedToggle.checked });
+            const eraserSpeedRangeItem = document.getElementById('eraserSpeedRangeItem');
+            if (eraserSpeedRangeItem) {
+                eraserSpeedRangeItem.style.display = eraserSpeedToggle.checked ? '' : 'none';
+            }
+            const eraserSpeedMaxRangeItem = document.getElementById('eraserSpeedMaxRangeItem');
+            if (eraserSpeedMaxRangeItem) {
+                eraserSpeedMaxRangeItem.style.display = eraserSpeedToggle.checked ? '' : 'none';
+            }
             const restartModal = document.getElementById('restartModal');
             const modalMessage = restartModal?.querySelector('.modal-message');
             if (modalMessage) {
                 modalMessage.textContent = window.i18n?.format_translate('settings.languageChanged') || '需要重启应用才能生效。';
             }
             if (restartModal) restartModal.classList.add('active');
+        });
+    }
+
+    const eraserSpeedMinInput = document.getElementById('eraserSpeedMinInput');
+    const eraserSpeedMinValue = document.getElementById('eraserSpeedMinValue');
+    if (eraserSpeedMinInput && eraserSpeedMinValue) {
+        eraserSpeedMinInput.addEventListener('input', async () => {
+            const val = parseInt(eraserSpeedMinInput.value);
+            eraserSpeedMinValue.textContent = val;
+            await settings_save_all_local({ eraserSpeedMinSize: val });
+        });
+    }
+
+    const eraserSpeedMaxInput = document.getElementById('eraserSpeedMaxInput');
+    const eraserSpeedMaxValue = document.getElementById('eraserSpeedMaxValue');
+    if (eraserSpeedMaxInput && eraserSpeedMaxValue) {
+        eraserSpeedMaxInput.addEventListener('input', async () => {
+            const val = parseInt(eraserSpeedMaxInput.value);
+            eraserSpeedMaxValue.textContent = val;
+            await settings_save_all_local({ eraserSpeedMaxSize: val });
         });
     }
 

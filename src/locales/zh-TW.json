@@ -90,6 +90,8 @@
     "dynamicResolutionHint": "放大時自動提高畫布解析度以獲得更清晰的顯示效果",
     "eraserSpeed": "速度擦",
     "eraserSpeedHint": "橡皮擦大小隨移動速度自動變化",
+    "eraserSpeedMin": "最小尺寸",
+    "eraserSpeedMax": "最大尺寸",
     "palmEraser": "手掌擦除",
     "palmEraserHint": "手掌/多指觸摸時自動切換為方塊擦除",
     "settingsManagement": "設定管理",

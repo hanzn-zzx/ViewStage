@@ -136,6 +136,20 @@
                             <span class="setting-hint" data-i18n="settings.eraserSpeedHint">橡皮擦大小随移动速度自动变化</span>
                         </div>
                     </div>
+                    <div class="setting-item" id="eraserSpeedRangeItem">
+                        <span class="setting-label"><span data-i18n="settings.eraserSpeedMin">最小</span></span>
+                        <div class="slider-wrapper">
+                            <input type="range" id="eraserSpeedMinInput" min="1" max="20" value="10">
+                            <span class="settings-slider-val" id="eraserSpeedMinValue">10</span>
+                        </div>
+                    </div>
+                    <div class="setting-item" id="eraserSpeedMaxRangeItem">
+                        <span class="setting-label"><span data-i18n="settings.eraserSpeedMax">最大</span></span>
+                        <div class="slider-wrapper">
+                            <input type="range" id="eraserSpeedMaxInput" min="101" max="150" value="120">
+                            <span class="settings-slider-val" id="eraserSpeedMaxValue">120</span>
+                        </div>
+                    </div>
                     <div class="setting-item flex-start">
                         <span class="setting-label">惯性移动</span>
                         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">

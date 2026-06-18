@@ -237,7 +237,7 @@ const DRAW_CONFIG = {
     eraserSize: 15,
     eraserSizePresets: [5, 15, 25, 38, 50],
     eraserSpeedEnabled: false,
-    eraserSpeedMinSize: 5,
+    eraserSpeedMinSize: 10,
     eraserSpeedMaxSize: 120,
     eraserSpeedFactor: 0.3,
     palmEraserEnabled: false,

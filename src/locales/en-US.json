@@ -90,6 +90,8 @@
     "dynamicResolutionHint": "Automatically increase canvas resolution when zooming for clearer display",
     "eraserSpeed": "Speed Eraser",
     "eraserSpeedHint": "Eraser size changes automatically with movement speed",
+    "eraserSpeedMin": "Min Size",
+    "eraserSpeedMax": "Max Size",
     "palmEraser": "Palm Eraser",
     "palmEraserHint": "Auto-switch to square eraser on palm/multi-touch contact",
     "settingsManagement": "Manage",
