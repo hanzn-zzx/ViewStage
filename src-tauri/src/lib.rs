@@ -11,7 +11,7 @@ mod image_processing;
 
 use image_processing::{
     image_load_base64, image_fetch_base64_data,
-    image_update_rotation, image_update_adjustments,
+    image_update_rotation,
 };
 
 #[cfg(target_os = "windows")]
@@ -60,19 +60,9 @@ pub struct Stroke {
     pub eraser_size: Option<f32>,
 }
 
-/// 笔画压缩请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompactStrokesRequest {
-    pub base_image: Option<String>,
-    pub strokes: Vec<Stroke>,
-    pub canvas_width: u32,
-    pub canvas_height: u32,
-}
-
 // ==================== 系统目录 ====================
 
 /// 集中管理应用所有存储路径
-#[allow(dead_code)]
 struct AppPaths {
     config_dir: std::path::PathBuf,
     cache_dir: std::path::PathBuf,
@@ -82,7 +72,6 @@ struct AppPaths {
     updates_dir: std::path::PathBuf,
     config_path: std::path::PathBuf,
     device_path: std::path::PathBuf,
-    pictures_dir: std::path::PathBuf,
 }
 
 impl AppPaths {
@@ -94,12 +83,6 @@ impl AppPaths {
             .map_err(|e| format!("Failed to get cache dir: {}", e))?;
         let data_dir = app.path().app_data_dir()
             .map_err(|e| format!("Failed to get data dir: {}", e))?;
-        let pictures_dir = dirs::picture_dir()
-            .unwrap_or_else(|| {
-                log::warn!("无法获取系统图片目录，回退到 config_dir/pictures");
-                config_dir.join("pictures")
-            })
-            .join("ViewStage");
 
         Ok(Self {
             log_dir: config_dir.join("log"),
@@ -110,7 +93,6 @@ impl AppPaths {
             config_dir,
             cache_dir,
             data_dir,
-            pictures_dir,
         })
     }
 }
@@ -1043,71 +1025,6 @@ fn canvas_render_line(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32
             y += sy;
         }
     }
-}
-
-/// Tauri IPC 命令：将笔画数据渲染到画布并返回 base64 PNG
-///
-/// 接收笔画数组（绘制/擦除/清空），在空白或给定底图上逐笔渲染，用于撤销缩略图生成
-#[tauri::command]
-fn stroke_format_compact(request: CompactStrokesRequest) -> Result<String, String> {
-    let mut canvas: RgbaImage = ImageBuffer::new(request.canvas_width, request.canvas_height);
-    
-    for pixel in canvas.pixels_mut() {
-        *pixel = Rgba([0, 0, 0, 0]);
-    }
-    
-    if let Some(base_image_data) = request.base_image {
-        if let Ok(base_img) = image_load_base64(&base_image_data) {
-            let base_rgba = base_img.to_rgba8();
-            for (x, y, pixel) in base_rgba.enumerate_pixels() {
-                if x < canvas.width() && y < canvas.height() {
-                    canvas.put_pixel(x, y, *pixel);
-                }
-            }
-        }
-    }
-    
-    for stroke in &request.strokes {
-        let points = &stroke.points;
-        
-        if stroke.stroke_type == "clear" {
-            for pixel in canvas.pixels_mut() {
-                *pixel = Rgba([0, 0, 0, 0]);
-            }
-            continue;
-        }
-        
-        if points.is_empty() {
-            continue;
-        }
-        
-        if stroke.stroke_type == "draw" {
-            let color = color_calc_from_hex(stroke.color.as_deref().unwrap_or("#3498db"))
-                .unwrap_or(DEFAULT_COLOR);
-            let line_width = stroke.line_width.unwrap_or(2);
-            
-            for point in points {
-                canvas_render_line(
-                    &mut canvas,
-                    point.from_x as i32,
-                    point.from_y as i32,
-                    point.to_x as i32,
-                    point.to_y as i32,
-                    color,
-                    line_width,
-                );
-            }
-        } else if stroke.stroke_type == "erase" {
-            // 擦除在前端 JS 中使用 Canvas API 预渲染，此处不再处理
-        }
-    }
-    
-    let mut buffer = Vec::new();
-    DynamicImage::ImageRgba8(canvas)
-        .write_to(&mut std::io::Cursor::new(&mut buffer), image::ImageFormat::Png)
-        .map_err(|e| format!("Failed to encode compacted image: {}", e))?;
-    
-    Ok(format!("data:image/png;base64,{}", general_purpose::STANDARD.encode(&buffer)))
 }
 
 // ==================== 全局状态 ====================
@@ -3344,146 +3261,6 @@ async fn filetype_set_icons_windows(app: tauri::AppHandle) -> Result<(), String>
     }
 }
 
-/// Tauri IPC 命令：移除文件类型关联（逆向操作 filetype_set_icons）
-#[tauri::command]
-async fn filetype_delete_icons() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        return filetype_delete_icons_windows().await;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return filetype_delete_icons_linux();
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    Err("此功能仅支持 Windows 和 Linux 系统".to_string())
-}
-
-/// Linux 平台：移除 ViewStage 的 .desktop 文件和 MIME XML，更新数据库
-#[cfg(target_os = "linux")]
-fn filetype_delete_icons_linux() -> Result<(), String> {
-    let data_home = std::env::var("XDG_DATA_HOME")
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            format!("{}/.local/share", home)
-        });
-
-    let applications_dir = std::path::Path::new(&data_home).join("applications");
-    let mime_packages_dir = std::path::Path::new(&data_home).join("mime").join("packages");
-    let mime_dir = std::path::Path::new(&data_home).join("mime");
-
-    // Remove desktop file
-    let desktop_file = applications_dir.join("viewstage.desktop");
-    if desktop_file.exists() {
-        std::fs::remove_file(&desktop_file).map_err(|e| format!("删除 .desktop 文件失败: {}", e))?;
-    }
-
-    // Remove MIME XML
-    let mime_xml = mime_packages_dir.join("viewstage-mime.xml");
-    if mime_xml.exists() {
-        std::fs::remove_file(&mime_xml).map_err(|e| format!("删除 MIME XML 文件失败: {}", e))?;
-    }
-
-    // Update databases
-    let _ = std::process::Command::new("update-desktop-database")
-        .arg(&applications_dir)
-        .output();
-    let _ = std::process::Command::new("update-mime-database")
-        .arg(&mime_dir)
-        .output();
-
-    log::info!("Linux 文件关联移除完成");
-    Ok(())
-}
-
-/// Windows 平台：移除注册表文件关联（ProgID、OpenWithProgids、UserChoice）并刷新图标缓存（同步版本）
-#[cfg(target_os = "windows")]
-fn filetype_delete_icons_windows_sync() -> Result<(), String> {
-    use std::process::Command;
-    use winreg::RegKey;
-    use winreg::enums::*;
-    
-    let app_id = "SECTL.ViewStage";
-    
-    log::info!("开始移除文件关联");
-    
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    
-    fn delete_progid(hkcu: &RegKey, prog_id: &str) -> Result<(), String> {
-        let classes_path = format!("Software\\Classes\\{}", prog_id);
-        if hkcu.delete_subkey_all(&classes_path).is_ok() {
-            log::info!("已删除 ProgID: {}", prog_id);
-        } else {
-            log::info!("ProgID {} 不存在或已删除", prog_id);
-        }
-        Ok(())
-    }
-    
-    delete_progid(&hkcu, &format!("{}.pdf", app_id))?;
-    delete_progid(&hkcu, &format!("{}.docx", app_id))?;
-    delete_progid(&hkcu, &format!("{}.doc", app_id))?;
-    
-    fn delete_association(hkcu: &RegKey, ext: &str, prog_id: &str) -> Result<(), String> {
-        let openwith_path = format!("Software\\Classes\\{}\\OpenWithProgids", ext);
-        if let Ok(openwith_key) = hkcu.open_subkey(&openwith_path) {
-            if openwith_key.delete_value(prog_id).is_ok() {
-                log::info!("已移除 {} 的 {} 关联", ext, prog_id);
-            }
-        }
-        Ok(())
-    }
-    
-    delete_association(&hkcu, ".pdf", &format!("{}.pdf", app_id))?;
-    delete_association(&hkcu, ".docx", &format!("{}.docx", app_id))?;
-    delete_association(&hkcu, ".doc", &format!("{}.doc", app_id))?;
-    
-    fn delete_user_choice(hkcu: &RegKey, ext: &str) -> Result<(), String> {
-        let user_choice_path = format!(
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\{}\\UserChoice",
-            ext
-        );
-        if hkcu.delete_subkey_all(&user_choice_path).is_ok() {
-            log::info!("已移除 {} 的 UserChoice 设置", ext);
-        } else {
-            log::info!("{} 的 UserChoice 不存在或已删除", ext);
-        }
-        Ok(())
-    }
-    
-    delete_user_choice(&hkcu, ".pdf")?;
-    delete_user_choice(&hkcu, ".docx")?;
-    delete_user_choice(&hkcu, ".doc")?;
-    
-    let ps_script = r#"
-        $code = @'
-        [DllImport("shell32.dll")]
-        public static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
-        '@
-        Add-Type -MemberDefinition $code -Name Shell -Namespace WinAPI
-        [WinAPI.Shell]::SHChangeNotify(0x8000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)
-        Write-Host "图标缓存已刷新"
-    "#;
-    
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("刷新图标缓存失败: {}", e))?;
-    
-    if !output.status.success() {
-        log::warn!("刷新图标缓存失败");
-    }
-    
-    log::info!("文件关联移除完成");
-    Ok(())
-}
-
-/// Windows 平台：移除注册表文件关联（异步版本，供 Tauri IPC 调用）
-#[cfg(target_os = "windows")]
-async fn filetype_delete_icons_windows() -> Result<(), String> {
-    filetype_delete_icons_windows_sync()
-}
-
 /// 卸载清理：移除文件关联、计划任务、注册表残留
 ///
 /// 如果检测到 ViewStage-upgrading 标记文件（正在升级中）则跳过，
@@ -3906,9 +3683,7 @@ pub fn app_init_run() {
             theme_import_vst,
             theme_get_preview,
             image_update_rotation,
-            image_update_adjustments,
             image_save_file,
-            stroke_format_compact,
             window_show_settings,
             mirror_update_state,
             mirror_fetch_state,
@@ -3935,7 +3710,6 @@ pub fn app_init_run() {
             office_convert_docx_to_pdf,
             office_convert_docx_to_pdf_bytes,
             filetype_set_icons,
-            filetype_delete_icons,
             device_detect_all,
             memreduct_clean_now,
             memreduct_setup,

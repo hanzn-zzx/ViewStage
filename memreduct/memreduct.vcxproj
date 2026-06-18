@@ -92,6 +92,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <PlatformArchitecture>32</PlatformArchitecture>
     <OutDir>$(SolutionDir)bin\$(PlatformArchitecture)\</OutDir>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);.\.\routine\src\;.\src\include\;.\src\</IncludePath>
     <GenerateManifest>false</GenerateManifest>
@@ -99,6 +100,7 @@
     <CodeAnalysisRuleSet>MixedRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <PlatformArchitecture>32</PlatformArchitecture>
     <OutDir>$(SolutionDir)bin\$(PlatformArchitecture)\</OutDir>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);.\.\routine\src\;.\src\include\;.\src\</IncludePath>
     <GenerateManifest>false</GenerateManifest>
@@ -106,6 +108,7 @@
     <CodeAnalysisRuleSet>MixedRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <PlatformArchitecture>64</PlatformArchitecture>
     <OutDir>$(SolutionDir)bin\$(PlatformArchitecture)\</OutDir>
     <TargetName>$(ProjectName)</TargetName>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);.\.\routine\src\;.\src\include\;.\src\</IncludePath>
@@ -114,6 +117,7 @@
     <CodeAnalysisRuleSet>MixedRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+    <PlatformArchitecture>ARM64</PlatformArchitecture>
     <TargetName>$(ProjectName)</TargetName>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);.\.\routine\src\;.\src\include\;.\src\</IncludePath>
     <GenerateManifest>false</GenerateManifest>
@@ -122,6 +126,7 @@
     <OutDir>$(SolutionDir)bin\$(PlatformArchitecture)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <PlatformArchitecture>64</PlatformArchitecture>
     <OutDir>$(SolutionDir)bin\$(PlatformArchitecture)\</OutDir>
     <TargetName>$(ProjectName)</TargetName>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);.\.\routine\src\;.\src\include\;.\src\</IncludePath>
@@ -130,6 +135,7 @@
     <CodeAnalysisRuleSet>MixedRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+    <PlatformArchitecture>ARM64</PlatformArchitecture>
     <TargetName>$(ProjectName)</TargetName>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);.\.\routine\src\;.\src\include\;.\src\</IncludePath>
     <GenerateManifest>false</GenerateManifest>

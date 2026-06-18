@@ -249,7 +249,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!toggle) return;
         toggle.addEventListener('change', () => {
             const enabled = toggle.checked;
-            const invoke = window.__TAURI__?.core?.invoke;
             if (invoke) {
                 invoke('settings_save_all', { settings: { developerMode: enabled } });
             }
@@ -265,7 +264,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!toggle) return;
         toggle.addEventListener('change', () => {
             const enabled = toggle.checked;
-            const invoke = window.__TAURI__?.core?.invoke;
             if (invoke) {
                 invoke('settings_save_all', { settings: { perfMonitorEnabled: enabled, developerMode: true } });
             }
@@ -288,7 +286,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 opt.classList.add('selected');
                 select.classList.remove('open');
 
-                const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { perfMonitorInterval: v, developerMode: true } });
                 }
@@ -315,7 +312,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.penMinWidthRatio = v;
                 }
-                const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { penMinWidthRatio: v, developerMode: true } });
                 }
@@ -342,7 +338,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.maxScaleImage = v;
                 }
-                const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { maxScaleImage: v, developerMode: true } });
                 }
@@ -369,7 +364,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.gestureFrameDelta = v;
                 }
-                const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { gestureFrameDelta: v, developerMode: true } });
                 }
@@ -396,7 +390,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.penTailDuration = v;
                 }
-                const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { penTailDuration: v, developerMode: true } });
                 }
@@ -423,7 +416,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.overlayDpr = v;
                 }
-                const invoke = window.__TAURI__?.core?.invoke;
                 if (invoke) {
                     invoke('settings_save_all', { settings: { overlayDpr: v, developerMode: true } });
                 }

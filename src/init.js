@@ -3,7 +3,6 @@
  */
 import ThemeManager from './themes/theme.js';
 import { history_init_manager, history_validate_undo } from './modules/history.js';
-import './modules/canvas/batch-draw.js';
 import './modules/canvas/tile-renderer.js';
 console.log('[init] module loaded, readyState:', document.readyState);
 
