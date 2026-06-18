@@ -3716,6 +3716,22 @@ fn memreduct_get_usage() -> u32 {
 #[tauri::command]
 fn memreduct_get_usage() -> u32 { 0 }
 
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn memreduct_clean_now(_mask: Option<u32>) -> Result<(), String> { Err("仅支持 Windows".into()) }
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn memreduct_setup() -> Result<(), String> { Err("仅支持 Windows".into()) }
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn memreduct_uninstall() -> Result<(), String> { Err("仅支持 Windows".into()) }
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn memreduct_check_skipuac() -> bool { false }
+
 /// 运行 memreduct 子进程并获取退出码（不映射为 Result）
 #[cfg(target_os = "windows")]
 fn run_memreduct_raw(args: &[&str]) -> Result<i32, String> {
