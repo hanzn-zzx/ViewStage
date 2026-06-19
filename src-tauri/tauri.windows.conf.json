@@ -5,7 +5,7 @@
       "icons/word.ico"
     ],
     "externalBin": [
-      "../memreduct/bin/64/memreduct-viewstage.exe"
+      "../memreduct/bin/64/clean.exe"
     ]
   }
 }
