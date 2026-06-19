@@ -1086,6 +1086,7 @@ async function importConfig() {
 
     state.importedSettings = settings;
     showImportStatus('success', _t('oobe.importSuccess'));
+    setTimeout(() => doTransition(8), 800);
   } catch (err) {
     console.error('Import failed:', err);
     showImportStatus('error', _t('oobe.importFailed'));
