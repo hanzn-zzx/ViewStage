@@ -42,7 +42,7 @@ fn main() {
         if memreduct_exe.exists() {
             let target = std::env::var("TARGET").unwrap_or_default();
             if !target.is_empty() {
-                let suffixed = bin_dir.join(format!("memreduct-viewstage-{target}.exe"));
+                let suffixed = bin_dir.join(format!("memreduct-viewstage.exe-{target}.exe"));
                 if !suffixed.exists() {
                     println!("cargo:warning=creating sidecar symlink: {}", suffixed.display());
                     let _ = std::fs::copy(&memreduct_exe, &suffixed);
