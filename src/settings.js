@@ -1904,7 +1904,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // 内存自动清理开关（仅保存偏好）
+    // 内存自动清理开关
     const memreductCleanToggle = document.getElementById('memreductCleanToggle');
     if (memreductCleanToggle) {
         const invoke = window.__TAURI__?.core?.invoke;
@@ -1914,8 +1914,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             }).catch(() => {});
         }
         memreductCleanToggle.addEventListener('change', async () => {
-            if (invoke) {
-                await invoke('settings_save_all', { settings: { memreductCleanEnabled: memreductCleanToggle.checked } });
+            if (!invoke) return;
+            await invoke('settings_save_all', { settings: { memreductCleanEnabled: memreductCleanToggle.checked } });
+            if (memreductCleanToggle.checked) {
+                try {
+                    const exists = await invoke('memreduct_check_skipuac');
+                    if (!exists) {
+                        await invoke('memreduct_setup');
+                    }
+                } catch (e) {
+                    console.warn('memory auto clean: 计划任务设置失败', e);
+                }
             }
         });
     }
