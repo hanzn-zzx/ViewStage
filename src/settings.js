@@ -1909,22 +1909,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (memreductCleanToggle) {
         const invoke = window.__TAURI__?.core?.invoke;
         if (invoke) {
-            invoke('settings_fetch_all').then(r => {
-                memreductCleanToggle.checked = r.settings?.memreductCleanEnabled !== false;
-            }).catch(() => {});
+            (async () => {
+                try {
+                    const exists = await invoke('memreduct_check_skipuac');
+                    if (exists) {
+                        const r = await invoke('settings_fetch_all');
+                        memreductCleanToggle.checked = r.settings?.memreductCleanEnabled !== false;
+                    } else {
+                        memreductCleanToggle.checked = false;
+                        await invoke('settings_save_all', { settings: { memreductCleanEnabled: false } });
+                    }
+                } catch (_) {
+                    memreductCleanToggle.checked = false;
+                }
+            })();
         }
         memreductCleanToggle.addEventListener('change', async () => {
             if (!invoke) return;
-            await invoke('settings_save_all', { settings: { memreductCleanEnabled: memreductCleanToggle.checked } });
             if (memreductCleanToggle.checked) {
                 try {
                     const exists = await invoke('memreduct_check_skipuac');
                     if (!exists) {
                         await invoke('memreduct_setup');
                     }
+                    await invoke('settings_save_all', { settings: { memreductCleanEnabled: true } });
                 } catch (e) {
                     console.warn('memory auto clean: 计划任务设置失败', e);
+                    memreductCleanToggle.checked = false;
                 }
+            } else {
+                await invoke('settings_save_all', { settings: { memreductCleanEnabled: false } });
             }
         });
     }

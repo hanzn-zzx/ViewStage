@@ -579,9 +579,25 @@ function setupPerformance() {
       btn.classList.add('active');
     });
   }
-  document.getElementById('memCleanToggle')?.addEventListener('change', (e) => {
-    state.memCleanEnabled = e.target.checked;
-  });
+  const toggle = document.getElementById('memCleanToggle');
+  if (toggle) {
+    toggle.addEventListener('change', (e) => {
+      state.memCleanEnabled = e.target.checked;
+    });
+    (async () => {
+      if (!invoke) return;
+      try {
+        const exists = await invoke('memreduct_check_skipuac');
+        if (!exists) {
+          state.memCleanEnabled = false;
+          toggle.checked = false;
+        }
+      } catch (_) {
+        state.memCleanEnabled = false;
+        toggle.checked = false;
+      }
+    })();
+  }
 }
 
 function setupDrawing() {
