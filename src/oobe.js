@@ -525,15 +525,17 @@ function setupLanguage() {
   grid.addEventListener('click', async (e) => {
     const item = e.target.closest('.lang-item');
     if (!item) return;
-    $$('.lang-item', grid).forEach(c => c.classList.remove('selected'));
-    item.classList.add('selected');
     const locale = item.dataset.value;
     if (window.i18n && locale !== state.language) {
       state.language = locale;
+      const scrollTop = grid.scrollTop;
       await window.i18n.load_messages(locale);
       window.i18n.render_page_texts();
       localStorage.setItem('language', locale);
       document.documentElement.lang = locale;
+      renderStepContent(0);
+      const newGrid = document.getElementById('languageSelect');
+      if (newGrid) newGrid.scrollTop = scrollTop;
     }
   });
 }
