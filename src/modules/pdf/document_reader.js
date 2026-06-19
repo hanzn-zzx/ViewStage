@@ -3115,6 +3115,15 @@ class DocumentReaderManager {
         const close_btn = document.getElementById('drBtnClose');
         if (close_btn) close_btn.addEventListener('click', () => this.close());
 
+        const minimize_btn = document.getElementById('drBtnMinimize');
+        if (minimize_btn) {
+            minimize_btn.addEventListener('click', async () => {
+                if (window.__TAURI__?.window?.getCurrentWindow) {
+                    await window.__TAURI__.window.getCurrentWindow().minimize();
+                }
+            });
+        }
+
         const prev_btn = document.getElementById('drPagePrev');
         const next_btn = document.getElementById('drPageNext');
         if (prev_btn) prev_btn.addEventListener('click', () => this.handle_page_nav_prev());
