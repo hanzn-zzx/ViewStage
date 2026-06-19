@@ -1,39 +1,49 @@
 @echo off
-@setlocal enableextensions
-rem @cd /d "%~dp0\..\"
+cd /d "%~dp0"
 
-rem VS 2026
-if exist "%ProgramFiles%\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat" (
-	call "%ProgramFiles%\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
-	goto start
+set "vcvarsall="
+set "vsPath="
+
+rem 1) Use vswhere (official VS locator, ships with VS 2017+)
+set "vswhere=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%vswhere%" (
+    for /f "usebackq delims=" %%i in (`"%vswhere%" -latest -requires Microsoft.Component.MSBuild -property installationPath`) do set "vsPath=%%i"
+    if defined vsPath (
+        if exist "%vsPath%\VC\Auxiliary\Build\vcvarsall.bat" (
+            set "vcvarsall=%vsPath%\VC\Auxiliary\Build\vcvarsall.bat"
+        )
+    )
 )
 
-if exist "%ProgramFiles%\Microsoft Visual Studio\18\Professional\VC\Auxiliary\Build\vcvarsall.bat" (
-	call "%ProgramFiles%\Microsoft Visual Studio\18\Professional\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
-	goto start
+rem 2) Fallback: scan known VS paths
+if not defined vcvarsall (
+    for %%v in (18 17) do for %%e in (Community Professional Enterprise) do (
+        if exist "%ProgramFiles%\Microsoft Visual Studio\%%v\%%e\VC\Auxiliary\Build\vcvarsall.bat" set "vcvarsall=%ProgramFiles%\Microsoft Visual Studio\%%v\%%e\VC\Auxiliary\Build\vcvarsall.bat"
+        if defined vcvarsall goto found
+        if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\%%v\%%e\VC\Auxiliary\Build\vcvarsall.bat" set "vcvarsall=%ProgramFiles(x86)%\Microsoft Visual Studio\%%v\%%e\VC\Auxiliary\Build\vcvarsall.bat"
+        if defined vcvarsall goto found
+    )
 )
 
-rem VS 2022
-if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" (
-	call "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
-	goto start
+:found
+if not defined vcvarsall (
+    echo [ERROR] Visual Studio not found. Install VS with "Desktop development with C++" workload.
+    pause
+    exit /b 1
 )
 
-if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat" (
-	call "%ProgramFiles%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
-	goto start
+call "%vcvarsall%" amd64
+if errorlevel 1 (
+    echo [ERROR] vcvarsall failed
+    pause
+    exit /b 1
 )
 
-echo Visual Studio 2022/2026 was not found...
-
-goto end
-
-:start
-
-msbuild memreduct.sln -property:Configuration=Release -property:Platform=x64 -verbosity:normal
-
-:end
-
-echo done...
-
+msbuild memreduct.vcxproj -property:Configuration=Release -property:Platform=x64 -verbosity:normal
+if errorlevel 1 (
+    echo [ERROR] Build failed
+    pause
+    exit /b 1
+)
+echo [OK] bin\64\memreduct-viewstage.exe
 pause

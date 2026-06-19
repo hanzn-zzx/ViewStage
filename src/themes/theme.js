@@ -319,4 +319,5 @@ if (document.readyState === 'loading') {
   ThemeManager.theme_update_active('com.viewstage.theme.simplify');
 }
 
+window.ThemeManager = ThemeManager;
 export default ThemeManager;

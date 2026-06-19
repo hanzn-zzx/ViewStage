@@ -1,56 +1,64 @@
-# dev-memreduct.ps1 — 编译 memreduct-viewstage.exe 供 cargo tauri dev 使用
-# 用法: cd memreduct; .\dev-memreduct.ps1
+# dev-memreduct.ps1 — Build memreduct-viewstage.exe for cargo tauri dev
+# Usage: cd memreduct; .\dev-memreduct.ps1 [-Arch x64|Win32]
+
+param([string]$Arch = 'x64')
 
 $ErrorActionPreference = 'Stop'
-
 $memreductDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$outExe = Join-Path $memreductDir 'bin\64\memreduct-viewstage.exe'
+$archDir = if ($Arch -eq 'x64') { '64' } elseif ($Arch -eq 'Win32') { '32' } else { throw "Unsupported architecture: $Arch" }
+$outExe = Join-Path $memreductDir "bin\$archDir\memreduct-viewstage.exe"
 
-# 查找 vcvarsall.bat
-$vsRoots = @(
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community",
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional",
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise",
-    "${env:ProgramFiles}\Microsoft Visual Studio\18\Community",
-    "${env:ProgramFiles}\Microsoft Visual Studio\18\Professional"
-)
-
+# Locate vcvarsall.bat — prefer vswhere, fallback to known paths
 $vcvarsall = $null
-foreach ($root in $vsRoots) {
-    $candidate = Join-Path $root 'VC\Auxiliary\Build\vcvarsall.bat'
-    if (Test-Path $candidate) {
-        $vcvarsall = $candidate
-        break
+
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vswhere) {
+    $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
+    if ($vsPath) {
+        $candidate = Join-Path $vsPath 'VC\Auxiliary\Build\vcvarsall.bat'
+        if (Test-Path $candidate) { $vcvarsall = $candidate }
     }
 }
 
 if (-not $vcvarsall) {
-    Write-Host '[ERROR] 未找到 Visual Studio (2022/2026)，请先安装 VS 并勾选 "使用 C++ 的桌面开发" 工作负载' -ForegroundColor Red
+    $vsEditions = @('Community', 'Professional', 'Enterprise')
+    $vsVersions = @(@{ Major = 18 }, @{ Major = 17 })
+    foreach ($ver in $vsVersions) {
+        foreach ($ed in $vsEditions) {
+            foreach ($pf in @("${env:ProgramFiles}", "${env:ProgramFiles(x86)}")) {
+                $candidate = "$pf\Microsoft Visual Studio\$($ver.Major)\$ed\VC\Auxiliary\Build\vcvarsall.bat"
+                if (Test-Path $candidate) { $vcvarsall = $candidate; break }
+            }
+            if ($vcvarsall) { break }
+        }
+        if ($vcvarsall) { break }
+    }
+}
+
+if (-not $vcvarsall) {
+    Write-Host '[ERROR] Visual Studio not found. Install VS with "Desktop development with C++" workload.' -ForegroundColor Red
     exit 1
 }
 
 Write-Host "[INFO] vcvarsall: $vcvarsall" -ForegroundColor Cyan
+Write-Host "[INFO] Building $Arch..." -ForegroundColor Cyan
 
-# 在 vcvarsall 环境中执行 msbuild
 $msbuildCmd = @"
-call "$vcvarsall" amd64 >nul 2>&1
-msbuild "$memreductDir\memreduct.sln" -property:Configuration=Release -property:Platform=x64 -verbosity:minimal
+call "$vcvarsall" $Arch >nul 2>&1
+msbuild "$memreductDir\memreduct.vcxproj" -property:Configuration=Release -property:Platform=$Arch -verbosity:minimal
 if errorlevel 1 exit /b 1
 "@
 
 cmd /c $msbuildCmd
 if ($LASTEXITCODE -ne 0) {
-    Write-Host '[ERROR] msbuild 编译失败' -ForegroundColor Red
+    Write-Host '[ERROR] Build failed' -ForegroundColor Red
     exit 1
 }
 
 if (Test-Path $outExe) {
     $size = (Get-Item $outExe).Length / 1KB
-    Write-Host "[OK] $outExe ({0:N0} KB)" -f $size -ForegroundColor Green
+    Write-Host "[OK] $outExe  ({0:N0} KB)" -f $size -ForegroundColor Green
 } else {
-    Write-Host "[ERROR] 编译成功但未找到 $outExe" -ForegroundColor Red
+    Write-Host "[ERROR] Build succeeded but $outExe not found" -ForegroundColor Red
     exit 1
 }
