@@ -67,6 +67,8 @@
     "sourceAdjust": "Source",
     "docReader": "Document Reader",
     "docReaderDefaultZoom": "Default Zoom",
+    "docReaderFitWidth": "Fit Width",
+    "docReaderFitPage": "Fit Page",
     "docReaderPageLayout": "Page Layout",
     "docReaderShowMinimize": "Show Minimize Button",
     "theme": "Theme",

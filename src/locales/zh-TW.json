@@ -67,6 +67,8 @@
     "sourceAdjust": "訊號源調節",
     "docReader": "文件閱讀器",
     "docReaderDefaultZoom": "預設縮放",
+    "docReaderFitWidth": "適合寬度",
+    "docReaderFitPage": "適合頁面",
     "docReaderPageLayout": "頁面佈局",
     "docReaderShowMinimize": "顯示最小化按鈕",
     "theme": "主題",

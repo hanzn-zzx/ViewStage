@@ -67,6 +67,8 @@
     "sourceAdjust": "소스",
     "docReader": "문서 뷰어",
     "docReaderDefaultZoom": "기본 확대/축소",
+    "docReaderFitWidth": "너비에 맞추기",
+    "docReaderFitPage": "페이지에 맞추기",
     "docReaderPageLayout": "페이지 레이아웃",
     "docReaderShowMinimize": "최소화 버튼 표시",
     "theme": "테마",

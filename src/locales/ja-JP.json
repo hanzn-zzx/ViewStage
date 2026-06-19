@@ -67,6 +67,8 @@
     "sourceAdjust": "ソース",
     "docReader": "ドキュメントリーダー",
     "docReaderDefaultZoom": "デフォルトズーム",
+    "docReaderFitWidth": "幅に合わせる",
+    "docReaderFitPage": "ページに合わせる",
     "docReaderPageLayout": "ページレイアウト",
     "docReaderShowMinimize": "最小化ボタンを表示",
     "theme": "テーマ",

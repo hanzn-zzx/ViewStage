@@ -67,6 +67,8 @@
     "sourceAdjust": "信号源调节",
     "docReader": "文档阅读器",
     "docReaderDefaultZoom": "默认缩放",
+    "docReaderFitWidth": "适合宽度",
+    "docReaderFitPage": "适合页面",
     "docReaderPageLayout": "页面布局",
     "docReaderShowMinimize": "显示最小化按钮",
     "theme": "主题",

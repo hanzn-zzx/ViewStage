@@ -67,6 +67,8 @@
     "sourceAdjust": "Источник",
     "docReader": "Читалка документов",
     "docReaderDefaultZoom": "Масштаб по умолчанию",
+    "docReaderFitWidth": "По ширине",
+    "docReaderFitPage": "По странице",
     "docReaderPageLayout": "Макет страницы",
     "docReaderShowMinimize": "Показать кнопку свернуть",
     "theme": "Тема",
