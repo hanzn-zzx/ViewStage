@@ -108,19 +108,7 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
     const currentFrameDeltaLabel = frameDeltaPresets.find(p => parseInt(p.value) === currentFrameDelta)?.label
         || `${currentFrameDelta}px`;
 
-    const tailDurationPresets = [
-        { value: '0', label: `0ms${_presetDisabled}` },
-        { value: '15', label: '15ms' },
-        { value: '25', label: '25ms' },
-        { value: '30', label: `30ms${_presetDefault}` },
-        { value: '50', label: '50ms' },
-        { value: '80', label: '80ms' },
-        { value: '100', label: '100ms' },
-        { value: '150', label: '150ms' },
-        { value: '200', label: '200ms' },
-    ];
-    const currentTailDurationLabel = tailDurationPresets.find(p => parseInt(p.value) === currentTailDuration)?.label
-        || `${currentTailDuration}ms`;
+    const currentTailDurationVal = currentTailDuration ?? 30;
 
     const overlayDprPresets = [
         { value: '0', label: _displayDefault },
@@ -198,18 +186,14 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         </div>
         <div class="setting-item">
             <span class="setting-label">${_tk('developer.tailDuration')}</span>
-            <div class="custom-select" id="devTailDurationSelect">
-                <div class="select-selected" id="devTailDurationSelected">${currentTailDurationLabel}</div>
-                <div class="select-options" id="devTailDurationOptions">
-                    ${tailDurationPresets.map(p => `
-                        <div class="select-option${parseInt(p.value) === currentTailDuration ? ' selected' : ''}" data-value="${p.value}">${p.label}</div>
-                    `).join('')}
-                </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+                <input type="number" id="devTailDurationInput" class="dev-number-input" value="${currentTailDurationVal}" min="0" max="500" step="1">
+                <span style="font-size:12px;color:var(--color-muted, #888);">ms</span>
             </div>
         </div>
         <div class="setting-item">
             <span class="setting-label">${_tk('developer.overlayDpr')}</span>
-            <div class="custom-select" id="devOverlayDprSelect">
+            <div class="custom-select" id="devOverlayDprSelect" data-select-up="always">
                 <div class="select-selected" id="devOverlayDprSelected">${currentOverlayDprLabel}</div>
                 <div class="select-options" id="devOverlayDprOptions">
                     ${overlayDprPresets.map(p => `
@@ -227,20 +211,64 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
     document.getElementById('devGoDetection')?.addEventListener('click', developer_options_show_detection);
     document.getElementById('devGoMemclean')?.addEventListener('click', developer_options_show_memclean);
 
-    // 统一接管所有自定义下拉框的展开/关闭
-    document.querySelectorAll('.custom-select').forEach(select => {
+    // 统一接管所有自定义下拉框的展开/关闭（使用 fixed 定位避免 CSS 类冲突）
+    function devClearSelectOpts(sel) {
+        const o = sel.querySelector('.select-options');
+        if (!o) return;
+        o.style.position = '';
+        o.style.left = '';
+        o.style.top = '';
+        o.style.bottom = '';
+        o.style.minWidth = '';
+        o.style.transform = '';
+        o.style.opacity = '';
+        o.style.visibility = '';
+    }
+    function devCloseAllSelects() {
+        document.querySelectorAll('#pageDevOptions .custom-select.open').forEach(s => {
+            s.classList.remove('open');
+            devClearSelectOpts(s);
+        });
+    }
+    document.addEventListener('click', devCloseAllSelects);
+    page.querySelectorAll('.custom-select').forEach(select => {
         const selected = select.querySelector('.select-selected');
         if (!selected) return;
+        const opts = select.querySelector('.select-options');
+        if (!opts) return;
         selected.addEventListener('click', (e) => {
             e.stopPropagation();
-            document.querySelectorAll('.custom-select').forEach(s => {
-                if (s !== select) s.classList.remove('open');
+            page.querySelectorAll('.custom-select.open').forEach(s => {
+                if (s !== select) {
+                    s.classList.remove('open');
+                    devClearSelectOpts(s);
+                }
             });
-            select.classList.toggle('open');
+            const isOpen = select.classList.toggle('open');
+            if (isOpen) {
+                const rect = selected.getBoundingClientRect();
+                void opts.offsetHeight;
+                const spaceBelow = window.innerHeight - rect.bottom;
+                const spaceAbove = rect.top;
+                const needed = opts.scrollHeight || 180;
+                const showUp = select.dataset.selectUp === 'always' || (spaceBelow < needed && spaceAbove > spaceBelow);
+                opts.style.position = 'fixed';
+                opts.style.left = rect.left + 'px';
+                opts.style.minWidth = rect.width + 'px';
+                opts.style.opacity = '1';
+                opts.style.visibility = 'visible';
+                opts.style.transform = 'translateY(0)';
+                if (showUp) {
+                    opts.style.top = '';
+                    opts.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+                } else {
+                    opts.style.top = (rect.bottom + 4) + 'px';
+                    opts.style.bottom = '';
+                }
+            } else {
+                devClearSelectOpts(select);
+            }
         });
-    });
-    document.addEventListener('click', () => {
-        document.querySelectorAll('.custom-select.open').forEach(s => s.classList.remove('open'));
     });
 
     // 开发者模式开关
@@ -279,12 +307,14 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!select || !selected) return;
 
         options.forEach(opt => {
-            opt.addEventListener('click', () => {
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const v = parseInt(opt.dataset.value);
                 selected.textContent = perf_interval_label(v);
                 options.forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 select.classList.remove('open');
+                devClearSelectOpts(select);
 
                 if (invoke) {
                     invoke('settings_save_all', { settings: { perfMonitorInterval: v, developerMode: true } });
@@ -302,12 +332,14 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!select || !selected) return;
 
         options.forEach(opt => {
-            opt.addEventListener('click', () => {
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const v = parseFloat(opt.dataset.value);
                 selected.textContent = opt.textContent;
                 options.forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 select.classList.remove('open');
+                devClearSelectOpts(select);
 
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.penMinWidthRatio = v;
@@ -328,12 +360,14 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!select || !selected) return;
 
         options.forEach(opt => {
-            opt.addEventListener('click', () => {
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const v = parseInt(opt.dataset.value);
                 selected.textContent = opt.textContent;
                 options.forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 select.classList.remove('open');
+                devClearSelectOpts(select);
 
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.maxScaleImage = v;
@@ -354,12 +388,14 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!select || !selected) return;
 
         options.forEach(opt => {
-            opt.addEventListener('click', () => {
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const v = parseInt(opt.dataset.value);
                 selected.textContent = opt.textContent;
                 options.forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 select.classList.remove('open');
+                devClearSelectOpts(select);
 
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.gestureFrameDelta = v;
@@ -371,29 +407,26 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         });
     })();
 
-    // 收尾时长选择器
-    (function setup_tail_duration_select() {
-        const select = document.getElementById('devTailDurationSelect');
-        const selected = document.getElementById('devTailDurationSelected');
-        const options = document.querySelectorAll('#devTailDurationOptions .select-option');
+    // 收尾时长输入框
+    (function setup_tail_duration_input() {
+        const input = document.getElementById('devTailDurationInput');
+        if (!input) return;
 
-        if (!select || !selected) return;
-
-        options.forEach(opt => {
-            opt.addEventListener('click', () => {
-                const v = parseInt(opt.dataset.value);
-                selected.textContent = opt.textContent;
-                options.forEach(o => o.classList.remove('selected'));
-                opt.classList.add('selected');
-                select.classList.remove('open');
-
+        let saveTimer = null;
+        input.addEventListener('input', () => {
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => {
+                const v = parseInt(input.value);
+                if (isNaN(v) || v < 0) return;
+                const val = Math.min(500, Math.max(0, v));
+                input.value = val;
                 if (window.DRAW_CONFIG) {
-                    window.DRAW_CONFIG.penTailDuration = v;
+                    window.DRAW_CONFIG.penTailDuration = val;
                 }
                 if (invoke) {
-                    invoke('settings_save_all', { settings: { penTailDuration: v, developerMode: true } });
+                    invoke('settings_save_all', { settings: { penTailDuration: val, developerMode: true } });
                 }
-            });
+            }, 300);
         });
     })();
 
@@ -406,12 +439,14 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
         if (!select || !selected) return;
 
         options.forEach(opt => {
-            opt.addEventListener('click', () => {
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const v = parseFloat(opt.dataset.value);
                 selected.textContent = opt.textContent;
                 options.forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 select.classList.remove('open');
+                devClearSelectOpts(select);
 
                 if (window.DRAW_CONFIG) {
                     window.DRAW_CONFIG.overlayDpr = v;

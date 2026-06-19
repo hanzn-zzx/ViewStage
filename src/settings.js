@@ -753,24 +753,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // 统一接管所有自定义下拉框的展开/关闭（stopPropagation 防止事件冲突）
     function settings_init_all_selects() {
+        function closeOneSelect(s) {
+            s.classList.remove('open');
+            const opts = document.querySelector('body > .select-options[data-owner="' + s.dataset.selectId + '"]');
+            if (opts) {
+                opts.style.opacity = '0';
+                opts.style.visibility = 'hidden';
+                setTimeout(() => {
+                    if (!s.classList.contains('open')) {
+                        s.appendChild(opts);
+                        opts.classList.remove('up');
+                        opts.style.position = '';
+                        opts.style.left = '';
+                        opts.style.top = '';
+                        opts.style.bottom = '';
+                        opts.style.minWidth = '';
+                        opts.style.transform = '';
+                    }
+                }, 200);
+            }
+        }
         function closeAllSelects() {
-            // 关闭所有 open 的下拉框（包括 portal 到 body 的）
-            document.querySelectorAll('.custom-select.open').forEach(s => {
-                s.classList.remove('open');
-            });
-            document.querySelectorAll('body > .select-options[data-owner]').forEach(opts => {
-                const owner = document.querySelector('.custom-select[data-select-id="' + opts.dataset.owner + '"]');
-                if (owner) {
-                    owner.appendChild(opts);
-                }
-                opts.style.position = '';
-                opts.style.left = '';
-                opts.style.top = '';
-                opts.style.minWidth = '';
-                opts.style.opacity = '';
-                opts.style.visibility = '';
-                opts.style.transform = '';
-            });
+            document.querySelectorAll('.custom-select.open').forEach(s => closeOneSelect(s));
         }
         document.addEventListener('click', closeAllSelects);
         let selectId = 0;
@@ -784,7 +788,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (opts) opts.dataset.owner = id;
             selected.addEventListener('click', (e) => {
                 e.stopPropagation();
-                closeAllSelects();
+                document.querySelectorAll('.custom-select.open').forEach(s => {
+                    if (s !== select) closeOneSelect(s);
+                });
                 const isOpen = select.classList.toggle('open');
                 if (opts) {
                     if (isOpen) {
@@ -792,9 +798,23 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (opts.parentNode !== document.body) {
                             document.body.appendChild(opts);
                         }
+                        opts.style.visibility = 'hidden';
+                        opts.style.opacity = '1';
+                        void opts.offsetHeight;
+                        const spaceBelow = window.innerHeight - rect.bottom;
+                        const spaceAbove = rect.top;
+                        const needed = opts.scrollHeight || 180;
+                        const showUp = spaceBelow < needed && spaceAbove > spaceBelow;
+                        opts.classList.toggle('up', showUp);
                         opts.style.position = 'fixed';
                         opts.style.left = rect.left + 'px';
-                        opts.style.top = (rect.bottom + 4) + 'px';
+                        if (showUp) {
+                            opts.style.top = '';
+                            opts.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+                        } else {
+                            opts.style.top = (rect.bottom + 4) + 'px';
+                            opts.style.bottom = '';
+                        }
                         opts.style.minWidth = rect.width + 'px';
                         opts.style.opacity = '1';
                         opts.style.visibility = 'visible';
@@ -803,9 +823,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (opts.parentNode !== select) {
                             select.appendChild(opts);
                         }
+                        opts.classList.remove('up');
                         opts.style.position = '';
                         opts.style.left = '';
                         opts.style.top = '';
+                        opts.style.bottom = '';
                         opts.style.minWidth = '';
                         opts.style.opacity = '';
                         opts.style.visibility = '';
@@ -825,9 +847,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             selectEl.appendChild(opts);
         }
         if (opts) {
+            opts.classList.remove('up');
             opts.style.position = '';
             opts.style.left = '';
             opts.style.top = '';
+            opts.style.bottom = '';
             opts.style.minWidth = '';
             opts.style.opacity = '';
             opts.style.visibility = '';

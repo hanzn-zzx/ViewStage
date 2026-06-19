@@ -2,7 +2,7 @@
 // Tauri IPC 命令注册入口，集成了图像处理、设置管理、文件转换、更新检测等核心模块
 
 use tauri::{Manager, Emitter};
-use image::{Rgba, RgbaImage};
+
 use base64::{Engine as _, engine::general_purpose};
 use zip::ZipArchive;
 use std::io::{Read, Write};
@@ -66,7 +66,6 @@ pub struct Stroke {
 struct AppPaths {
     config_dir: std::path::PathBuf,
     cache_dir: std::path::PathBuf,
-    data_dir: std::path::PathBuf,
     log_dir: std::path::PathBuf,
     themes_dir: std::path::PathBuf,
     updates_dir: std::path::PathBuf,
@@ -92,7 +91,6 @@ impl AppPaths {
             device_path: config_dir.join("device.json"),
             config_dir,
             cache_dir,
-            data_dir,
         })
     }
 }
@@ -920,111 +918,6 @@ fn image_save_file(image_data: String, prefix: Option<String>) -> Result<ImageSa
         error: None,
         enhanced_data: None,
     })
-}
-
-// ==================== 笔画压缩 ====================
-
-/// 解析 #RGB / #RGBA / #RRGGBB / #RRGGBBAA 格式颜色字符串为 RGBA
-fn color_calc_from_hex(color_str: &str) -> Result<Rgba<u8>, String> {
-    if !color_str.starts_with('#') {
-        return Err(format!("Invalid color format: must start with '#', got: {}", color_str));
-    }
-    
-    let hex = &color_str[1..];
-    // 展开简写: #RGB -> #RRGGBB, #RGBA -> #RRGGBBAA
-    let expanded = match hex.len() {
-        3 => {
-            let r = hex.chars().nth(0).unwrap();
-            let g = hex.chars().nth(1).unwrap();
-            let b = hex.chars().nth(2).unwrap();
-            format!("{0}{0}{1}{1}{2}{2}", r, g, b)
-        }
-        4 => {
-            let r = hex.chars().nth(0).unwrap();
-            let g = hex.chars().nth(1).unwrap();
-            let b = hex.chars().nth(2).unwrap();
-            let a = hex.chars().nth(3).unwrap();
-            format!("{0}{0}{1}{1}{2}{2}{3}{3}", r, g, b, a)
-        }
-        _ => hex.to_string()
-    };
-    
-    match expanded.len() {
-        6 => {
-            let r = u8::from_str_radix(&expanded[0..2], 16)
-                .map_err(|_| format!("Invalid red component in color: {}", color_str))?;
-            let g = u8::from_str_radix(&expanded[2..4], 16)
-                .map_err(|_| format!("Invalid green component in color: {}", color_str))?;
-            let b = u8::from_str_radix(&expanded[4..6], 16)
-                .map_err(|_| format!("Invalid blue component in color: {}", color_str))?;
-            Ok(Rgba([r, g, b, 255]))
-        }
-        8 => {
-            let r = u8::from_str_radix(&expanded[0..2], 16)
-                .map_err(|_| format!("Invalid red component in color: {}", color_str))?;
-            let g = u8::from_str_radix(&expanded[2..4], 16)
-                .map_err(|_| format!("Invalid green component in color: {}", color_str))?;
-            let b = u8::from_str_radix(&expanded[4..6], 16)
-                .map_err(|_| format!("Invalid blue component in color: {}", color_str))?;
-            let a = u8::from_str_radix(&expanded[6..8], 16)
-                .map_err(|_| format!("Invalid alpha component in color: {}", color_str))?;
-            Ok(Rgba([r, g, b, a]))
-        }
-        _ => Err(format!("Invalid color format: expected #RGB/#RGBA/#RRGGBB/#RRGGBBAA, got: {}", color_str))
-    }
-}
-
-const DEFAULT_COLOR: Rgba<u8> = Rgba([52, 152, 219, 255]);
-
-/// 在画布上用 Bresenham 算法绘制圆形笔触线段
-fn canvas_render_line(canvas: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, color: Rgba<u8>, width: u32) {
-    let dx = (x2 - x1).abs();
-    let dy = (y2 - y1).abs();
-    let sx = if x1 < x2 { 1 } else { -1 };
-    let sy = if y1 < y2 { 1 } else { -1 };
-    let mut err = dx - dy;
-    let mut x = x1;
-    let mut y = y1;
-    
-    let half_width = (width / 2) as i32;
-    
-    loop {
-        for wx in -half_width..=half_width {
-            for wy in -half_width..=half_width {
-                let px = x + wx;
-                let py = y + wy;
-                if px >= 0 && py >= 0 && (px as u32) < canvas.width() && (py as u32) < canvas.height() {
-                    let dist = ((wx * wx + wy * wy) as f32).sqrt();
-                    if dist <= half_width as f32 {
-                        let pixel = canvas.get_pixel_mut(px as u32, py as u32);
-                        if color[3] == 255 {
-                            *pixel = color;
-                        } else {
-                            let alpha = color[3] as f32 / 255.0;
-                            let inv_alpha = 1.0 - alpha;
-                            pixel[0] = (color[0] as f32 * alpha + pixel[0] as f32 * inv_alpha) as u8;
-                            pixel[1] = (color[1] as f32 * alpha + pixel[1] as f32 * inv_alpha) as u8;
-                            pixel[2] = (color[2] as f32 * alpha + pixel[2] as f32 * inv_alpha) as u8;
-                        }
-                    }
-                }
-            }
-        }
-        
-        if x == x2 && y == y2 {
-            break;
-        }
-        
-        let e2 = 2 * err;
-        if e2 > -dy {
-            err -= dy;
-            x += sx;
-        }
-        if e2 < dx {
-            err += dx;
-            y += sy;
-        }
-    }
 }
 
 // ==================== 全局状态 ====================
