@@ -2709,7 +2709,11 @@ async fn office_convert_docx_to_pdf_bytes(file_data: Vec<u8>, file_name: String,
     let doc_cache_dir = paths.cache_dir.join(&folder_name);
     fs::create_dir_all(&doc_cache_dir).map_err(|e| e.to_string())?;
 
-    let temp_name = format!("temp_{}.docx", chrono::Local::now().format("%Y%m%d%H%M%S"));
+    let ext = std::path::Path::new(&file_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("docx");
+    let temp_name = format!("temp_{}.{}", chrono::Local::now().format("%Y%m%d%H%M%S"), ext);
     let temp_docx_path = doc_cache_dir.join(&temp_name);
 
     {

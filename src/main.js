@@ -1323,15 +1323,19 @@ async function main_load_pdf_from_path(filePath, autoOpen = false) {
         
         console.log('文件大小:', uint8Array.length, '字节');
         const fileMd5 = main_calculate_md5(uint8Array);
-        fileData = null;
-        uint8Array = null;
         
         main_update_loading_progress(window.i18n?.format_translate('loading.processingWord') || '正在处理 Word 文档...');
         
+        const fileName = filePath.split(/[\\/]/).pop();
+        const fileDataForConvert = Array.from(uint8Array);
+        fileData = null;
+        uint8Array = null;
+        
         let pdfPath = null;
         try {
-            pdfPath = await invoke('office_convert_docx_to_pdf', {
-                docxPath: filePath
+            pdfPath = await invoke('office_convert_docx_to_pdf_bytes', {
+                fileData: fileDataForConvert,
+                fileName: fileName
             });
             console.log('Word 文档已转换为 PDF:', pdfPath);
         } catch (convertError) {
@@ -4511,22 +4515,13 @@ function main_load_pdf() {
             
             let pdfPath = null;
             try {
-                const nativeFilePath = file.path || file._path || null;
-                if (nativeFilePath) {
-                    arrayBuffer = null;
-                    uint8Array = null;
-                    pdfPath = await invoke('office_convert_docx_to_pdf', {
-                        docxPath: nativeFilePath
-                    });
-                } else {
-                    const fileDataForConvert = Array.from(uint8Array);
-                    arrayBuffer = null;
-                    uint8Array = null;
-                    pdfPath = await invoke('office_convert_docx_to_pdf_bytes', {
-                        fileData: fileDataForConvert,
-                        fileName: file.name
-                    });
-                }
+                const fileDataForConvert = Array.from(uint8Array);
+                arrayBuffer = null;
+                uint8Array = null;
+                pdfPath = await invoke('office_convert_docx_to_pdf_bytes', {
+                    fileData: fileDataForConvert,
+                    fileName: file.name
+                });
                 console.log('Word 文档已转换为 PDF:', pdfPath);
             } catch (convertError) {
                 main_hide_loading_overlay();
