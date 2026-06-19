@@ -2250,7 +2250,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     /** 显示有可用更新 */
     function show_update_available(release) {
         const latest_notes = release.body || '';
-        update_els.releaseNotes.textContent = latest_notes || (i18n.format_translate('common.noContent') || '暂无内容');
+        update_els.releaseNotes.innerHTML = latest_notes
+            ? renderMarkdownSimple(latest_notes)
+            : (i18n.format_translate('common.noContent') || '暂无内容');
 
         const size = release.assets && release.assets.length > 0 ? release.assets[0].size : 0;
         const size_text = size > 0 ? settings_format_file_size(size) : '';
@@ -2268,9 +2270,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function show_already_latest(current_release, current_version) {
         let notes = i18n.format_translate('settings.alreadyLatest') || '当前已是最新版本';
         if (current_release && current_release.body) {
-            notes = current_release.body;
+            update_els.releaseNotes.innerHTML = renderMarkdownSimple(current_release.body);
+        } else {
+            update_els.releaseNotes.textContent = notes;
         }
-        update_els.releaseNotes.textContent = notes;
 
         update_els.appStatus.textContent = i18n.format_translate('settings.alreadyLatest') || '已是最新版本';
         update_els.appStatus.className = 'update-app-status status-latest';

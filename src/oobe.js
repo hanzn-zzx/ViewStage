@@ -735,7 +735,7 @@ async function showUpdateResult(result) {
     const notesEl = document.getElementById('updateNotes');
     if (notesEl) {
       if (result.release?.body) {
-        notesEl.textContent = result.release.body;
+        notesEl.innerHTML = renderMarkdownSimple(result.release.body);
         notesEl.style.display = '';
       } else {
         notesEl.style.display = 'none';

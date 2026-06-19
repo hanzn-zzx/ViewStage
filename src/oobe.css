@@ -371,9 +371,50 @@ body {
   font-size: 13px;
   line-height: 1.6;
   color: var(--color-text-secondary);
-  white-space: pre-wrap;
   max-height: 180px;
   overflow-y: auto;
+}
+
+.release-notes h3,
+.release-notes h4 {
+  color: var(--color-text-primary);
+  margin: 16px 0 8px;
+  font-weight: 600;
+}
+
+.release-notes h3 { font-size: 14px; }
+.release-notes h4 { font-size: 13px; }
+
+.release-notes h3:first-child,
+.release-notes h4:first-child {
+  margin-top: 0;
+}
+
+.release-notes ul,
+.release-notes ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.release-notes li {
+  margin-bottom: 4px;
+}
+
+.release-notes p {
+  margin: 8px 0;
+}
+
+.release-notes p:first-child {
+  margin-top: 0;
+}
+
+.release-notes code {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  padding: 2px 6px;
+  background: var(--color-surface-hover);
+  border-radius: 4px;
+  color: var(--color-text-primary);
 }
 
 .update-banner.banner-available {
