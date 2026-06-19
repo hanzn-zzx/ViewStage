@@ -3,7 +3,8 @@ fn main() {
     {
         let manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let manifest_dir = std::path::Path::new(&manifest_dir_str);
-        let memreduct_exe = manifest_dir.join("../memreduct/bin/64/memreduct-viewstage.exe");
+        let bin_dir = manifest_dir.join("../memreduct/bin/64");
+        let memreduct_exe = bin_dir.join("memreduct-viewstage.exe");
 
         if !memreduct_exe.exists() {
             println!("cargo:warning=memreduct-viewstage.exe not found — building C++ project...");
@@ -34,6 +35,17 @@ fn main() {
                 Err(e) => {
                     println!("cargo:warning=could not launch powershell: {e}");
                     println!("cargo:warning=Run memreduct\\dev-memreduct.ps1 manually before cargo tauri build");
+                }
+            }
+        }
+
+        if memreduct_exe.exists() {
+            let target = std::env::var("TARGET").unwrap_or_default();
+            if !target.is_empty() {
+                let suffixed = bin_dir.join(format!("memreduct-viewstage-{target}.exe"));
+                if !suffixed.exists() {
+                    println!("cargo:warning=creating sidecar symlink: {}", suffixed.display());
+                    let _ = std::fs::copy(&memreduct_exe, &suffixed);
                 }
             }
         }

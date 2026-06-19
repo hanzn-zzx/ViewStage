@@ -3308,6 +3308,7 @@ fn dirs_data_dir() -> Option<std::path::PathBuf> {
 // ==================== 内存清理子进程（memreduct.exe） ====================
 
 /// 查找 memreduct.exe 路径
+#[cfg(target_os = "windows")]
 fn find_memreduct_exe() -> Result<std::path::PathBuf, String> {
     let names = ["memreduct-viewstage.exe"];
 

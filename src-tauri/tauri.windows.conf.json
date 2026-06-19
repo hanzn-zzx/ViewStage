@@ -1,8 +1,6 @@
 {
   "bundle": {
-    "resources": [
-      "icons/pdf.ico",
-      "icons/word.ico",
+    "externalBin": [
       "../memreduct/bin/64/memreduct-viewstage.exe"
     ]
   }
