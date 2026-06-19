@@ -706,6 +706,12 @@ async function setupInstalling() {
     } else {
       await invoke('oobe_submit_complete');
     }
+    // 遥测上报：OOBE 完成
+    import('./modules/telemetry/telemetry.js').then(m => {
+      m.reportOnline();
+    }).catch(e => {
+      console.warn('[oobe] telemetry report failed:', e);
+    });
   } catch (err) {
     console.error('Setup failed:', err);
     if (_downloadFilePath) {

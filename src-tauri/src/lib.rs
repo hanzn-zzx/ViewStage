@@ -1140,6 +1140,64 @@ async fn update_fetch_check() -> Result<UpdateCheckResult, String> {
     })
 }
 
+/// 遥测 HTTP POST 请求（绕过 CORS）
+#[tauri::command]
+async fn telemetry_http_post(url: String, body: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("ViewStage")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    if !status.is_success() {
+        log::warn!("Telemetry POST failed: status={}, body={}", status, text);
+        return Err(format!("HTTP error: {} - {}", status, text));
+    }
+
+    Ok(text)
+}
+
+/// 遥测 HTTP GET 请求（绕过 CORS）
+#[tauri::command]
+async fn telemetry_http_get(url: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("ViewStage")
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    Ok(text)
+}
+
 /// 备份损坏的配置文件，文件名带时间戳
 fn config_backup_corrupted(config_path: &std::path::Path) {
     let parent = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -3674,7 +3732,9 @@ pub fn app_init_run() {
             memreduct_setup,
             memreduct_uninstall,
             memreduct_check_skipuac,
-            memreduct_get_usage
+            memreduct_get_usage,
+            telemetry_http_post,
+            telemetry_http_get
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

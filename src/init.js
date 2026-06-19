@@ -522,6 +522,13 @@ async function main_init_all() {
             }
         }
 
+        // 遥测初始化（延迟执行，不阻塞启动）
+        import('./modules/telemetry/telemetry.js').then(m => {
+            m.telemetryInit();
+        }).catch(e => {
+            console.warn('[init] telemetry init failed:', e);
+        });
+
         // 缓存清理验证（延迟执行，不阻塞启动）
         setTimeout(() => {
             window.__TAURI__?.core?.invoke('cache_validate_auto_clear').catch(() => {});
