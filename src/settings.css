@@ -1599,6 +1599,10 @@ button {
     grid-template-columns: repeat(2, 1fr);
 }
 
+#docReaderZoomGroup::before {
+    width: calc((100% - 6px) / 2);
+}
+
 #docReaderZoomGroup[data-active="fitWidth"]::before {
     transform: translateX(0);
 }
