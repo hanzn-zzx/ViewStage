@@ -42,6 +42,10 @@
                 <span class="btn-icon"><img data-icon="source" width="16" height="16"></span>
                 <span class="btn-text" data-i18n="settings.sourceAdjust">信号源调节</span>
             </button>
+            <button class="sidebar-btn" id="btnDocReader">
+                <span class="btn-icon"><img data-icon="file-text" width="16" height="16"></span>
+                <span class="btn-text" data-i18n="settings.docReader">文档阅读器</span>
+            </button>
             <button class="sidebar-btn" id="btnTheme">
                 <span class="btn-icon"><img data-icon="theme-icon" width="16" height="16"></span>
                 <span class="btn-text" data-i18n="settings.theme">主题</span>
@@ -423,7 +427,26 @@
                     </div>
 
                 </div>
-                
+
+                <div class="page" id="pageDocReader">
+                    <h2 class="page-title" data-i18n="settings.docReader">文档阅读器</h2>
+                    <div class="setting-item">
+                        <span class="setting-label" data-i18n="settings.docReaderDefaultZoom">默认缩放</span>
+                        <div class="option-group" id="docReaderZoomGroup">
+                            <button class="option-btn active" data-value="fit">适合宽度</button>
+                            <button class="option-btn" data-value="page">适合页面</button>
+                            <button class="option-btn" data-value="custom">自定义</button>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label" data-i18n="settings.docReaderPageLayout">页面布局</span>
+                        <div class="option-group" id="docReaderLayoutGroup">
+                            <button class="option-btn active" data-value="single">单页</button>
+                            <button class="option-btn" data-value="continuous">连续</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="page" id="pageTheme">
                     <h2 class="page-title" data-i18n="settings.theme">主题</h2>
                     <div class="theme-grid" id="themeGrid"></div>

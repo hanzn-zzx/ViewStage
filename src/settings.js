@@ -2143,6 +2143,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 'btnStorage': 'pageStorage',
                 'btnCanvas': 'pageCanvas',
                 'btnSource': 'pageSource',
+                'btnDocReader': 'pageDocReader',
                 'btnTheme': 'pageTheme',
                 'btnAbout': 'pageAbout'
             };
