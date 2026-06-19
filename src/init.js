@@ -350,12 +350,14 @@ async function main_init_all() {
         console.log('[init] progress 0 emitted');
 
         if (window.i18n) {
+            app_emit_splash_progress(0, '正在初始化多语言...');
             console.log('[init] init_start begin');
             await window.i18n.init_start();
             console.log('[init] init_start done');
         }
 
         if (window.__TAURI__) {
+            app_emit_splash_progress(0, '正在检查运行环境...');
             console.log('[init] checking oobe_active');
             const isOobeActive = await window.__TAURI__.core.invoke('oobe_check_active');
             console.log('[init] oobe_active:', isOobeActive);
@@ -363,10 +365,12 @@ async function main_init_all() {
                 console.log('[init] OOBE active, returning');
                 return;
             }
+            app_emit_splash_progress(0, '正在注册文件关联...');
             console.log('[init] setup_pdf_file_open');
             window.main_setup_pdf_file_open();
         }
 
+        app_emit_splash_progress(0, '正在构建界面...');
         if (!dom_init_all()) {
             console.error('[init] dom_init_all failed');
             throw new Error('DOM 初始化失败');
@@ -375,18 +379,22 @@ async function main_init_all() {
 
         app_emit_splash_progress(1, '正在加载设置...');
         console.log('[init] progress 1 emitted');
+        app_emit_splash_progress(1, '正在初始化缓存路径...');
         console.log('[init] dir_init_cache_path begin');
         await dir_init_cache_path();
         console.log('[init] dir_init_cache_path done');
 
+        app_emit_splash_progress(1, '正在加载摄像头配置...');
         console.log('[init] settings_load_camera_config begin');
         await settings_load_camera_config();
         console.log('[init] settings_load_camera_config done');
 
         app_emit_splash_progress(2, '正在加载组件...');
         console.log('[init] progress 2 emitted');
+        app_emit_splash_progress(2, '正在初始化画布...');
         console.log('[init] calling canvas_init_all');
         canvas_init_all();
+        app_emit_splash_progress(2, '正在加载白板...');
         console.log('[init] blackboard init');
         if (window.__blackboardEnabled !== false) {
             try {
@@ -395,16 +403,19 @@ async function main_init_all() {
                 console.error('[init] blackboard lazy load error:', e);
             }
         }
+        app_emit_splash_progress(2, '正在加载文档阅读器...');
         console.log('[init] document reader init');
         if (window.documentReaderManager) {
             window.documentReaderManager.init();
         }
+        app_emit_splash_progress(2, '正在加载历史记录...');
         console.log('[init] history_init_manager');
         history_init_manager({
             on_state_change: () => {
                 history_update_button_status();
             }
         });
+        app_emit_splash_progress(2, '正在绑定事件...');
         console.log('[init] setup_all_events');
         window.main_setup_all_events();
         console.log('[init] draw_save_snapshot');
@@ -439,32 +450,41 @@ async function main_init_all() {
 
         // 摄像头检测与初始化：先枚举设备，无摄像头则直接跳过
         let is_camera_handled = false;
+        let has_video_device = false;
 
         if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
             try {
+                app_emit_splash_progress(4, '正在检测摄像头设备...');
                 console.log('[init] enumerateDevices');
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 console.log('[init] devices found:', devices.length);
-                if (!devices.some(d => d.kind === 'videoinput')) {
+                has_video_device = devices.some(d => d.kind === 'videoinput');
+                if (!has_video_device) {
+                    app_emit_splash_progress(4, '未检测到摄像头，跳过');
                     console.log('[init] no video devices, initWithoutCamera');
                     await window.main_init_without_camera(window.i18n?.format_translate('camera.notDetected') || '未检测到摄像头');
                     is_camera_handled = true;
                 }
             } catch (e) {
+                app_emit_splash_progress(4, '摄像头检测失败');
                 console.warn('[init] enumerateDevices error:', e);
             }
         }
 
         if (!is_camera_handled) {
             try {
+                app_emit_splash_progress(4, '正在连接摄像头...');
                 console.log('[init] init_camera');
                 await window.main_init_camera();
+                app_emit_splash_progress(4, '摄像头已连接');
                 console.log('[init] init_camera done');
             } catch (error) {
                 const err_name = error?.name || '';
                 const handled_codes = ['NotFoundError', 'DevicesNotFoundError', 'NotAllowedError', 'PermissionDeniedError'];
                 if (handled_codes.includes(err_name)) {
                     const is_not_found = (err_name === 'NotFoundError' || err_name === 'DevicesNotFoundError');
+                    const msg = is_not_found ? '未检测到摄像头' : '无摄像头权限';
+                    app_emit_splash_progress(4, msg);
                     console.warn('[init] init_camera handled:', is_not_found ? 'no device' : 'no permission', error?.message);
                     const msg_key = is_not_found ? 'camera.notDetected' : 'camera.noPermission';
                     const fallback = is_not_found ? '未检测到摄像头' : '无摄像头权限';
@@ -476,6 +496,7 @@ async function main_init_all() {
                         window.main_setup_deferred_camera();
                     }
                 } else {
+                    app_emit_splash_progress(4, '摄像头初始化失败');
                     console.error('[init] 摄像头初始化失败:', error?.name, error?.message);
                     await window.main_init_without_camera(
                         window.i18n?.format_translate('camera.initFailed') || '摄像头初始化失败'

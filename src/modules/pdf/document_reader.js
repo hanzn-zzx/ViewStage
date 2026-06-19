@@ -3111,7 +3111,7 @@ class DocumentReaderManager {
 
     // ====== 工具栏事件 ======
 
-    _setup_toolbar_events() {
+    async _setup_toolbar_events() {
         const close_btn = document.getElementById('drBtnClose');
         if (close_btn) close_btn.addEventListener('click', () => this.close());
 

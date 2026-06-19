@@ -4,7 +4,7 @@
  * 使用 DrawingEngine 管理绘制管线
  */
 
-import { InputSource, PinchZoomSource } from '../gesture/index.js';
+import { InputSource, PinchZoomSource, VirtualDeviceType } from '../gesture/index.js';
 import { BlackboardPageManager } from './blackboard-page.js';
 import { DrawingEngine } from './drawing-engine.js';
 import { history_state, history_validate_undo, history_reset_executing } from '../history.js';
@@ -626,8 +626,20 @@ class BlackboardManager {
             this.bb_wrapper.classList.remove('smooth-transform');
             this.bb_wrapper.style.willChange = '';
         }
-        // 清理 gesture 模块
-        this._teardown_gesture();
+        // 清理 gesture 模块 — 仅重置状态，不销毁 InputSource/PinchZoomSource。
+        // 两者保持附着但不会收到事件（面板关闭时 transform 移出屏幕）。
+        // 防止下次 open() 时手势事件丢失导致无法批注/缩放。
+        if (this._input_source) {
+            // 重置活跃指针状态（防止残留状态污染下次 open）
+            this._input_source._emitAllUp(VirtualDeviceType.LostCapture);
+            // 重新 attach 确保状态干净
+            this._input_source.detach();
+            this._input_source.attach();
+        }
+        // 重置 PinchZoomSource 内部状态（不移除监听）
+        if (this._pinch_source) {
+            this._pinch_source._isPinching = false;
+        }
         this.bb_state.is_scaling = false;
         this.bb_state.is_dragging = false;
 
@@ -1693,6 +1705,9 @@ class BlackboardManager {
         }
         this._cached_container_rect = null;
         this._cached_main_toolbar = null;
+
+        // 清理手势资源
+        this._teardown_gesture();
 
         if (this.drawing_engine) {
             if (this.drawing_engine.is_drawing || this.drawing_engine.current_stroke) {
