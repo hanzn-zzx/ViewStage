@@ -1595,6 +1595,18 @@ button {
     transform: translateX(200%);
 }
 
+#docReaderZoomGroup {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+#docReaderZoomGroup[data-active="fitWidth"]::before {
+    transform: translateX(0);
+}
+
+#docReaderZoomGroup[data-active="fitPage"]::before {
+    transform: translateX(100%);
+}
+
 #mirrorGroup[data-active=""]::before,
 #mirrorGroup[data-active="none"]::before {
     transform: translateX(0);
