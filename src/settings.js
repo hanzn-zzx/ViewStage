@@ -873,6 +873,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 closeSelect(languageSelect);
                 const saved = await settings_save_all_local({ language: value });
                 if (saved) {
+                    if (window.i18n) {
+                        await window.i18n.load_messages(value);
+                        window.i18n.render_page_texts();
+                    }
                     const restartModal = document.getElementById('restartModal');
                     if (restartModal) restartModal.classList.add('active');
                 } else {

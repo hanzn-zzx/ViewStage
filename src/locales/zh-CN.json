@@ -92,6 +92,8 @@
     "eraserSpeedHint": "橡皮擦大小随移动速度自动变化",
     "palmEraser": "手掌擦除",
     "palmEraserHint": "手掌/多指触摸时自动切换为方块擦除",
+    "momentum": "惯性移动",
+    "momentumHint": "拖拽/缩放释放后画布继续滑行",
     "settingsManagement": "设置管理",
     "exportSettings": "导出设置",
     "importSettings": "导入设置",

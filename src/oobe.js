@@ -293,6 +293,12 @@ const STEP_TPL = [
         { v: 'zh-CN', label: '简体中文' },
         { v: 'zh-TW', label: '繁體中文' },
         { v: 'en-US', label: 'English' },
+        { v: 'ja-JP', label: '日本語' },
+        { v: 'ko-KR', label: '한국어' },
+        { v: 'fr-FR', label: 'Français' },
+        { v: 'de-DE', label: 'Deutsch' },
+        { v: 'es-ES', label: 'Español' },
+        { v: 'ru-RU', label: 'Русский' },
       ].map(o => html`
         <div class="lang-item ${o.v === state.language ? 'selected' : ''}" data-value="${o.v}">
           <span class="lang-label">${o.label}</span>

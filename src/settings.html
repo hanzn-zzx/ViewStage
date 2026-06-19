@@ -66,6 +66,12 @@
                                 <div class="select-option" data-value="zh-CN">简体中文</div>
                                 <div class="select-option" data-value="zh-TW">繁體中文</div>
                                 <div class="select-option" data-value="en-US">English</div>
+                                <div class="select-option" data-value="ja-JP">日本語</div>
+                                <div class="select-option" data-value="ko-KR">한국어</div>
+                                <div class="select-option" data-value="fr-FR">Français</div>
+                                <div class="select-option" data-value="de-DE">Deutsch</div>
+                                <div class="select-option" data-value="es-ES">Español</div>
+                                <div class="select-option" data-value="ru-RU">Русский</div>
                             </div>
                         </div>
                     </div>
@@ -118,8 +124,6 @@
                             </div>
                         </div>
 
-                        <div class="setting-divider"></div>
-
                         <div class="setting-item flex-start">
                             <span class="setting-label" data-i18n="settings.dynamicResolution">动态分辨率</span>
                             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
@@ -141,13 +145,13 @@
                             </div>
                         </div>
                         <div class="setting-item flex-start">
-                            <span class="setting-label">惯性移动</span>
+                            <span class="setting-label" data-i18n="settings.momentum">惯性移动</span>
                             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="momentumToggle">
                                     <span class="toggle-slider"></span>
                                 </label>
-                                <span class="setting-hint">拖拽/缩放释放后画布继续滑行</span>
+                                <span class="setting-hint" data-i18n="settings.momentumHint">拖拽/缩放释放后画布继续滑行</span>
                             </div>
                         </div>
                         <div class="setting-item flex-start" id="palmEraserItem">
@@ -160,8 +164,6 @@
                                 <span class="setting-hint" data-i18n="settings.palmEraserHint">手掌/多指触摸时自动切换为方块擦除</span>
                             </div>
                         </div>
-
-                        <div class="setting-divider"></div>
 
                         <div class="setting-item" id="dprRangeItem">
                             <span class="setting-label">DPR <span data-i18n="settings.range">范围</span></span>
@@ -202,8 +204,6 @@
                                 </div>
                             </div>
                         </div>
-
-                        <div class="setting-divider"></div>
 
                         <div class="setting-item flex-start">
                             <span class="setting-label" data-i18n="settings.penColors">画笔颜色</span>

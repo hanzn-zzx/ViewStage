@@ -130,10 +130,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </label>
         </div>
         <div class="setting-item">
-            <span class="setting-label">${_tk('developer.docDetection')}</span>
-            <span id="devGoDetection" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">→</span>
-        </div>
-        <div class="setting-item">
             <span class="setting-label">${_tk('developer.perfMonitor')}</span>
             <label class="toggle-switch">
                 <input type="checkbox" id="devPerfMonitorToggle"${perfMonitorEnabled ? ' checked' : ''}>
@@ -185,13 +181,6 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </div>
         </div>
         <div class="setting-item">
-            <span class="setting-label">${_tk('developer.tailDuration')}</span>
-            <div style="display:flex;align-items:center;gap:6px;">
-                <input type="number" id="devTailDurationInput" class="dev-number-input" value="${currentTailDurationVal}" min="0" max="500" step="1">
-                <span style="font-size:12px;color:var(--color-muted, #888);">ms</span>
-            </div>
-        </div>
-        <div class="setting-item">
             <span class="setting-label">${_tk('developer.overlayDpr')}</span>
             <div class="custom-select" id="devOverlayDprSelect" data-select-up="always">
                 <div class="select-selected" id="devOverlayDprSelected">${currentOverlayDprLabel}</div>
@@ -203,8 +192,19 @@ function developer_options_show_main(currentWidthRatio, currentMaxScale, perfMon
             </div>
         </div>
         <div class="setting-item">
+            <span class="setting-label">${_tk('developer.tailDuration')}</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+                <input type="number" id="devTailDurationInput" class="dev-number-input" value="${currentTailDurationVal}" min="0" max="500" step="1">
+                <span style="font-size:12px;color:var(--color-muted, #888);">ms</span>
+            </div>
+        </div>
+        <div class="setting-item">
             <span class="setting-label">${_tk('memclean.title')}</span>
             <span id="devGoMemclean" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">→</span>
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">${_tk('developer.docDetection')}</span>
+            <span id="devGoDetection" style="cursor:pointer;font-size:18px;color:var(--color-muted, #888);padding:4px;">→</span>
         </div>
     `;
 

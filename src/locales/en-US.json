@@ -92,6 +92,8 @@
     "eraserSpeedHint": "Eraser size changes automatically with movement speed",
     "palmEraser": "Palm Eraser",
     "palmEraserHint": "Auto-switch to square eraser on palm/multi-touch contact",
+    "momentum": "Momentum",
+    "momentumHint": "Canvas continues sliding after drag/zoom release",
     "settingsManagement": "Manage",
     "exportSettings": "Export",
     "importSettings": "Import",

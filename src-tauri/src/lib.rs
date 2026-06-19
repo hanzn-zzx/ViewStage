@@ -947,7 +947,7 @@ async fn window_show_settings(app: tauri::AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("settings.html".into())
     )
     .title("设置")
-    .inner_size(600.0, 600.0)
+    .inner_size(960.0, 540.0)
     .resizable(false)
     .decorations(false)
     .always_on_top(true)
