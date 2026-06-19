@@ -68,6 +68,7 @@
     "docReader": "ドキュメントリーダー",
     "docReaderDefaultZoom": "デフォルトズーム",
     "docReaderPageLayout": "ページレイアウト",
+    "docReaderShowMinimize": "最小化ボタンを表示",
     "theme": "テーマ",
     "selectTheme": "テーマを選択",
     "themeDark": "ダーク",

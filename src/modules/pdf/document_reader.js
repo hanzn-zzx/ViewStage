@@ -3122,6 +3122,12 @@ class DocumentReaderManager {
                     await window.__TAURI__.window.getCurrentWindow().minimize();
                 }
             });
+            try {
+                const result = await window.__TAURI__?.core?.invoke('settings_fetch_all');
+                if (result?.settings?.docReaderShowMinimize === false) {
+                    minimize_btn.style.display = 'none';
+                }
+            } catch (_) {}
         }
 
         const prev_btn = document.getElementById('drPagePrev');

@@ -68,6 +68,7 @@
     "docReader": "Читалка документов",
     "docReaderDefaultZoom": "Масштаб по умолчанию",
     "docReaderPageLayout": "Макет страницы",
+    "docReaderShowMinimize": "Показать кнопку свернуть",
     "theme": "Тема",
     "selectTheme": "Выбор темы",
     "themeDark": "Тёмная",

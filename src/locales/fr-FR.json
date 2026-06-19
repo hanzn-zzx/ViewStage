@@ -68,6 +68,7 @@
     "docReader": "Lecteur de documents",
     "docReaderDefaultZoom": "Zoom par défaut",
     "docReaderPageLayout": "Mise en page",
+    "docReaderShowMinimize": "Afficher le bouton réduire",
     "theme": "Thème",
     "selectTheme": "Choisir le thème",
     "themeDark": "Sombre",

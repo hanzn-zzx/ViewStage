@@ -68,6 +68,7 @@
     "docReader": "문서 뷰어",
     "docReaderDefaultZoom": "기본 확대/축소",
     "docReaderPageLayout": "페이지 레이아웃",
+    "docReaderShowMinimize": "최소화 버튼 표시",
     "theme": "테마",
     "selectTheme": "테마 선택",
     "themeDark": "다크",

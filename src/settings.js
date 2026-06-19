@@ -450,6 +450,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                         btn.classList.toggle('active', btn.dataset.value === zoom);
                     });
                 }
+
+                const docReaderShowMinimizeToggle = document.getElementById('docReaderShowMinimizeToggle');
+                if (docReaderShowMinimizeToggle) {
+                    docReaderShowMinimizeToggle.checked = settings.docReaderShowMinimize !== false;
+                }
                 
                 // 主题设置 — 卡片模式
                 const savedTheme = settings.theme || 'com.viewstage.theme.simplify';
@@ -1477,6 +1482,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 buttons.forEach(b => b.classList.toggle('active', b === btn));
                 await settings_save_all_local({ docReaderDefaultZoom: zoom });
             });
+        });
+    }
+
+    // 文档阅读器显示最小化按钮
+    const docReaderShowMinimizeToggle = document.getElementById('docReaderShowMinimizeToggle');
+    if (docReaderShowMinimizeToggle) {
+        docReaderShowMinimizeToggle.addEventListener('change', async () => {
+            await settings_save_all_local({ docReaderShowMinimize: docReaderShowMinimizeToggle.checked });
         });
     }
     

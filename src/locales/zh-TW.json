@@ -68,6 +68,7 @@
     "docReader": "文件閱讀器",
     "docReaderDefaultZoom": "預設縮放",
     "docReaderPageLayout": "頁面佈局",
+    "docReaderShowMinimize": "顯示最小化按鈕",
     "theme": "主題",
     "selectTheme": "選擇主題",
     "themeDark": "深色",

@@ -68,6 +68,7 @@
     "docReader": "Dokumentenleser",
     "docReaderDefaultZoom": "Standardzoom",
     "docReaderPageLayout": "Seitenlayout",
+    "docReaderShowMinimize": "Minimierungsschaltfläche anzeigen",
     "theme": "Design",
     "selectTheme": "Design auswählen",
     "themeDark": "Dunkel",
