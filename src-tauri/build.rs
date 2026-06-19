@@ -40,13 +40,9 @@ fn main() {
         }
 
         if memreduct_exe.exists() {
-            let clean_exe = bin_dir.join("clean.exe");
-            if !clean_exe.exists() {
-                let _ = std::fs::copy(&memreduct_exe, &clean_exe);
-            }
             let target = std::env::var("TARGET").unwrap_or_default();
             if !target.is_empty() {
-                let suffixed = bin_dir.join(format!("clean.exe-{target}.exe"));
+                let suffixed = bin_dir.join(format!("memreduct-viewstage-{target}.exe"));
                 if !suffixed.exists() {
                     println!("cargo:warning=creating sidecar: {}", suffixed.display());
                     let _ = std::fs::copy(&memreduct_exe, &suffixed);

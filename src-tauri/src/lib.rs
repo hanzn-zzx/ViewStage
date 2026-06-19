@@ -3310,7 +3310,7 @@ fn dirs_data_dir() -> Option<std::path::PathBuf> {
 /// 查找 memreduct.exe 路径
 #[cfg(target_os = "windows")]
 fn find_memreduct_exe() -> Result<std::path::PathBuf, String> {
-    let names = ["clean.exe", "memreduct-viewstage.exe"];
+    let names = ["memreduct-viewstage.exe"];
 
     // 优先查找同级目录（生产环境）
     if let Ok(exe_path) = std::env::current_exe() {
