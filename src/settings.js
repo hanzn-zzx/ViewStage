@@ -440,6 +440,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                         }
                     }
                 }
+
+                const docReaderZoomGroup = document.getElementById('docReaderZoomGroup');
+                if (docReaderZoomGroup) {
+                    const zoom = settings.docReaderDefaultZoom || 'fitWidth';
+                    docReaderZoomGroup.dataset.active = zoom;
+                    const buttons = docReaderZoomGroup.querySelectorAll('.option-btn');
+                    buttons.forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.value === zoom);
+                    });
+                }
                 
                 // 主题设置 — 卡片模式
                 const savedTheme = settings.theme || 'com.viewstage.theme.simplify';
@@ -1452,6 +1462,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                         window.realPenManager.invalidate_cache();
                     }
                 }
+            });
+        });
+    }
+
+    // 文档阅读器默认缩放
+    const docReaderZoomGroup = document.getElementById('docReaderZoomGroup');
+    if (docReaderZoomGroup) {
+        const buttons = docReaderZoomGroup.querySelectorAll('.option-btn');
+        buttons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const zoom = btn.dataset.value;
+                docReaderZoomGroup.dataset.active = zoom;
+                buttons.forEach(b => b.classList.toggle('active', b === btn));
+                await settings_save_all_local({ docReaderDefaultZoom: zoom });
             });
         });
     }
