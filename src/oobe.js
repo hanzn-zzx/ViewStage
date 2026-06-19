@@ -1025,6 +1025,10 @@ function setupCustomSelects() {
       if (sel.id === 'cameraResolutionSelect') {
         applyCameraResolution();
       }
+
+      if (sel.id === 'defaultRotationSelect') {
+        applyCameraRotation();
+      }
     });
   });
 }
@@ -1060,6 +1064,17 @@ function applyCameraResolution() {
   const track = state.cameraStream.getVideoTracks()[0];
   if (track) {
     track.applyConstraints({ width: { ideal: w }, height: { ideal: h } }).catch(() => {});
+  }
+}
+
+function applyCameraRotation() {
+  const rotOpt = $('#defaultRotationSelect .option.selected');
+  if (!rotOpt) return;
+  const deg = parseInt(rotOpt.dataset.value);
+  state.defaultRotation = deg;
+  const video = document.getElementById('cameraPreview');
+  if (video) {
+    video.style.transform = `rotate(${deg}deg)`;
   }
 }
 
