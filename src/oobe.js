@@ -955,8 +955,8 @@ async function initResolutionSelect(stream) {
   if (!hasMax) filtered.push({ w: maxW, h: maxH, label: `${maxW}×${maxH} (${_t('oobe.max')})` });
   filtered.sort((a, b) => (b.w * b.h) - (a.w * a.h));
 
-  const def = filtered.find(r => r.w === 1280 && r.h === 720) || filtered[0];
-  const defIdx = filtered.indexOf(def);
+  const def = filtered[0];
+  const defIdx = 0;
 
   options.innerHTML = '';
   filtered.forEach((r, i) => {

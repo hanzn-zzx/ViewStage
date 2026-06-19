@@ -718,8 +718,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             cameraResolutionOptionsContainer.appendChild(option);
         });
         
-        const targetWidth = savedWidth || 1280;
-        const targetHeight = savedHeight || 720;
+        const targetWidth = savedWidth || (resolutions[0]?.w || 1280);
+        const targetHeight = savedHeight || (resolutions[0]?.h || 720);
         const targetRes = `${targetWidth}x${targetHeight}`;
         
         const resOptions = cameraResolutionOptionsContainer.querySelectorAll('.select-option');
@@ -734,9 +734,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         
         if (!found && resOptions.length > 0) {
-            const defaultOption = Array.from(resOptions).find(opt => 
-                opt.dataset.value === '1280x720'
-            ) || resOptions[0];
+            const defaultOption = resOptions[0];
             cameraResolutionSelected.textContent = defaultOption.textContent;
             defaultOption.classList.add('selected');
         }
