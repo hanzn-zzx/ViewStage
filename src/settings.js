@@ -8,6 +8,8 @@
  * - 关于：版本信息、检查更新
  */
 
+import { checkForUpdate, startDownload, installDownload, onProgress, offProgress } from './modules/update/update.js';
+
 document.addEventListener('DOMContentLoaded', async () => {
     await i18n.init_start();
 
@@ -2210,279 +2212,160 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (btnUpdate) {
         btnUpdate.addEventListener('click', () => {
             settings_show_page('pageUpdate');
-            settings_load_update_page();
+            setupCheckUpdate();
         });
     }
 
-    // ==================== 更新功能 ====================
+    // ==================== 更新功能（OOBE 风格） ====================
 
-    // DOM 元素引用
-    const update_els = {
-        currentVersion: document.getElementById('updateCurrentVersion'),
-        appStatus: document.getElementById('updateAppStatus'),
-        options: document.getElementById('updateOptions'),
+    let _latestRelease = null;
+    let _downloadFilePath = null;
+    let _downloadCancelled = false;
+    let _updateChecked = false;
+    let _updateResult = null;
+
+    const _upd = {
         banner: document.getElementById('updateBanner'),
-        releaseNotes: document.getElementById('updateReleaseNotesContent'),
+        notes: document.getElementById('updateNotes'),
+        status: document.getElementById('updateStatus'),
         progress: document.getElementById('updateDownloadProgress'),
         progressBar: document.getElementById('updateProgressBar'),
         progressText: document.getElementById('updateProgressText'),
-        status: document.getElementById('updateStatus'),
-        btnCheck: document.getElementById('btnCheckUpdate'),
         btnDownload: document.getElementById('btnUpdateDownload'),
-        mirrorGroup: document.getElementById('mirrorGroup'),
+        appInfo: document.getElementById('updateAppInfo'),
     };
 
-    let latest_release_data = null;
-    let download_file_path = null;
-    let mirror_url = '';
-    let download_cancelled = false;
-
-    // 镜像选择初始化（含旧版 useMirror 兼容迁移）
-    if (update_els.mirrorGroup) {
-        let saved_mirror = localStorage.getItem('mirrorUrl');
-        if (!saved_mirror && localStorage.getItem('useMirror') === 'true') {
-            saved_mirror = 'https://gh-proxy.com/';
-            localStorage.removeItem('useMirror');
-            localStorage.setItem('mirrorUrl', saved_mirror);
-        }
-        saved_mirror = saved_mirror || '';
-        mirror_url = saved_mirror;
-        update_els.mirrorGroup.dataset.active = saved_mirror;
-        const buttons = update_els.mirrorGroup.querySelectorAll('.option-btn');
-        buttons.forEach(btn => {
-            if (btn.dataset.value === saved_mirror) {
-                btn.classList.add('active');
-            }
-            btn.addEventListener('click', () => {
-                const value = btn.dataset.value;
-                mirror_url = value;
-                update_els.mirrorGroup.dataset.active = value;
-                buttons.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                localStorage.setItem('mirrorUrl', value);
-            });
-        });
+    function _resetUpdateUI() {
+        _upd.banner.style.display = 'none';
+        _upd.banner.className = 'update-banner';
+        _upd.notes.style.display = 'none';
+        _upd.notes.innerHTML = '';
+        _upd.progress.style.display = 'none';
+        _upd.btnDownload.style.display = 'none';
+        _upd.appInfo.style.display = 'none';
+        _downloadCancelled = false;
+        _latestRelease = null;
+        _downloadFilePath = null;
+        _upd.btnDownload.onclick = _startDownload;
     }
 
-    /**
-     * 加载更新页面：获取当前版本、检查更新
-     */
-    async function settings_load_update_page() {
-        if (!window.__TAURI__) return;
-        const { invoke } = window.__TAURI__.core;
-
-        const current_version = await invoke('app_fetch_version');
-        update_els.currentVersion.textContent = `v${current_version}`;
-        reset_update_ui();
-
-        update_els.releaseNotes.textContent = i18n.format_translate('settings.checkingForUpdates') || '正在检查更新...';
-        update_els.btnCheck.disabled = true;
-
-        try {
-            const result = await invoke('update_fetch_check');
-            update_els.btnCheck.disabled = false;
-
-            if (result.has_update && result.release) {
-                latest_release_data = result.release;
-                show_update_available(result.release);
-            } else {
-                show_already_latest(result.current_release, current_version);
-            }
-        } catch (error) {
-            console.error('检查更新失败:', error);
-            update_els.releaseNotes.textContent = i18n.format_translate('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
-            show_banner('error', i18n.format_translate('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试');
-            update_els.btnCheck.disabled = false;
-            update_els.options.style.display = 'none';
-            latest_release_data = null;
-        }
-    }
-
-    /** 重置更新页面 UI 状态 */
-    function reset_update_ui() {
-        update_els.appStatus.textContent = '';
-        update_els.appStatus.className = 'update-app-status';
-        update_els.banner.style.display = 'none';
-        update_els.banner.className = 'update-banner';
-        update_els.progress.style.display = 'none';
-        update_els.btnDownload.style.display = 'none';
-        update_els.status.textContent = '';
-        update_els.status.className = '';
-        update_els.options.style.display = '';
-        download_cancelled = false;
-        latest_release_data = null;
-        download_file_path = null;
-        update_els.btnDownload.onclick = settings_start_download;
-        const btnCancel = document.getElementById('btnCancelDownload');
-        if (btnCancel) {
-            btnCancel.style.display = 'none';
-            btnCancel.disabled = false;
-        }
-    }
-
-    /** 显示有可用更新 */
-    function show_update_available(release) {
-        const latest_notes = release.body || '';
-        update_els.releaseNotes.innerHTML = latest_notes
-            ? renderMarkdownSimple(latest_notes)
-            : (i18n.format_translate('common.noContent') || '暂无内容');
-
-        const size = release.assets && release.assets.length > 0 ? release.assets[0].size : 0;
-        const size_text = size > 0 ? settings_format_file_size(size) : '';
-        const release_tag = release.tag_name.replace(/^v/, '');
-        const banner_msg = size_text
-            ? `${i18n.format_translate('settings.updateAvailable') || '发现新版本'} v${release_tag}（${size_text}）`
-            : `${i18n.format_translate('settings.updateAvailable') || '发现新版本'} v${release_tag}`;
-
-        show_banner('available', banner_msg);
-        update_els.btnDownload.style.display = 'inline-flex';
-        update_els.options.style.display = '';
-    }
-
-    /** 显示已是最新版本 */
-    function show_already_latest(current_release, current_version) {
-        let notes = i18n.format_translate('settings.alreadyLatest') || '当前已是最新版本';
-        if (current_release && current_release.body) {
-            update_els.releaseNotes.innerHTML = renderMarkdownSimple(current_release.body);
+    function setupCheckUpdate() {
+        if (_updateChecked) {
+            _showUpdateResult(_updateResult);
         } else {
-            update_els.releaseNotes.textContent = notes;
+            _upd.status.innerHTML = '<div class="spinner"></div><div class="update-text">' + (i18n.format_translate('settings.checkingForUpdates') || '检查更新...') + '</div>';
+            _doCheckUpdate();
         }
-
-        update_els.appStatus.textContent = i18n.format_translate('settings.alreadyLatest') || '已是最新版本';
-        update_els.appStatus.className = 'update-app-status status-latest';
-        update_els.options.style.display = 'none';
     }
 
-    /** 显示更新横幅 */
-    function show_banner(type, message) {
-        update_els.banner.className = `update-banner banner-${type}`;
-        update_els.banner.textContent = message;
-        update_els.banner.style.display = 'block';
-    }
-
-    /** 格式化文件大小 */
-    function settings_format_file_size(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    // 检查更新按钮
-    if (update_els.btnCheck) {
-        update_els.btnCheck.addEventListener('click', async () => {
-            await settings_load_update_page();
-        });
-    }
-
-    /** 下载更新 */
-    async function settings_start_download() {
-        if (!latest_release_data || !latest_release_data.assets || latest_release_data.assets.length === 0) return;
-
-        const { invoke } = window.__TAURI__.core;
-
-        const platform = await invoke('app_fetch_platform');
-        const platform_map = { windows: /\.(exe|msi)$/i, linux: /\.(deb|AppImage)$/i, macos: /\.dmg$/i };
-        const pattern = platform_map[platform] || /\.(exe|msi|deb|AppImage|dmg)$/i;
-        const asset = latest_release_data.assets.find(a => pattern.test(a.name)) || latest_release_data.assets[0];
-        const download_url = asset.browser_download_url;
-        const file_name = asset.name;
-
-        download_cancelled = false;
-        update_els.btnDownload.disabled = true;
-        update_els.btnDownload.textContent = i18n.format_translate('settings.downloading') || '正在下载...';
-        update_els.progress.style.display = 'block';
-        update_els.progressBar.style.width = '0%';
-        update_els.progressText.textContent = '0%';
-        update_els.banner.style.display = 'none';
-
-        const btnCancel = document.getElementById('btnCancelDownload');
-        if (btnCancel) {
-            btnCancel.style.display = '';
-            btnCancel.disabled = false;
-        }
-
-        let unlisten = null;
-
+    async function _doCheckUpdate() {
         try {
-            const { listen } = window.__TAURI__.event;
-            unlisten = await listen('update-download-progress', (event) => {
-                if (download_cancelled) return;
-                const progress = event.payload;
-                update_els.progressBar.style.width = progress + '%';
-                update_els.progressText.textContent = i18n.format_translate('settings.downloadingUpdate', { percent: Math.round(progress) }) || `正在下载 ${Math.round(progress)}%`;
-            });
+            const { result } = await checkForUpdate();
+            _updateChecked = true;
+            _updateResult = result;
+            _showUpdateResult(result);
+        } catch (err) {
+            console.warn('Update check failed:', err);
+            _updateChecked = true;
+            _updateResult = null;
+            _upd.status.innerHTML = '';
+            _upd.banner.className = 'update-banner banner-error';
+            _upd.banner.textContent = i18n.format_translate('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
+            _upd.banner.style.display = '';
+        }
+    }
 
-            download_file_path = await invoke('update_download_file', {
-                url: download_url,
-                fileName: file_name,
-                mirrorUrl: mirror_url,
-            });
+    function _showUpdateResult(result) {
+        _upd.status.innerHTML = '';
 
-            if (download_cancelled) return;
+        if (!result) {
+            _upd.banner.className = 'update-banner banner-error';
+            _upd.banner.textContent = i18n.format_translate('settings.updateCheckFailedDetail') || '检查更新失败，请稍后重试';
+            _upd.banner.style.display = '';
+            return;
+        }
 
-            update_els.progressBar.style.width = '100%';
-            update_els.progressText.textContent = i18n.format_translate('settings.downloadComplete') || '下载完成';
-            if (btnCancel) btnCancel.style.display = 'none';
+        _upd.appInfo.style.display = '';
 
-            setTimeout(() => {
-                update_els.progress.style.display = 'none';
-                update_els.btnDownload.textContent = i18n.format_translate('settings.installNow') || '立即安装';
-                update_els.btnDownload.disabled = false;
-                update_els.btnDownload.onclick = settings_start_install;
-                show_banner('success', i18n.format_translate('settings.downloadComplete') || '下载完成，点击"立即安装"以完成更新');
-            }, 800);
-
-        } catch (error) {
-            const errorStr = String(error);
-            if (download_cancelled || errorStr.includes('cancelled') || errorStr.includes('canceled')) {
-                console.log('下载已取消');
+        if (result.has_update) {
+            _upd.banner.style.display = 'none';
+            if (result.release?.body) {
+                _upd.notes.innerHTML = renderMarkdownSimple(result.release.body);
+                _upd.notes.style.display = '';
             } else {
-                console.error('下载更新失败:', error);
-                settings_show_dialog(i18n.format_translate('settings.downloadFailed') || '下载失败', errorStr, 'error');
+                _upd.notes.style.display = 'none';
             }
-            update_els.progress.style.display = 'none';
-            update_els.btnDownload.disabled = false;
-            update_els.btnDownload.textContent = i18n.format_translate('settings.downloadUpdate') || '下载更新';
-            if (btnCancel) btnCancel.style.display = 'none';
-        } finally {
-            if (unlisten) unlisten();
+            _upd.btnDownload.style.display = '';
+            _latestRelease = result.release;
+        } else {
+            _upd.banner.className = 'update-banner banner-latest';
+            _upd.banner.textContent = i18n.format_translate('settings.alreadyLatest') || '当前已是最新版本';
+            _upd.banner.style.display = '';
+            if (result.current_release?.body) {
+                _upd.notes.innerHTML = renderMarkdownSimple(result.current_release.body);
+                _upd.notes.style.display = '';
+            } else {
+                _upd.notes.style.display = 'none';
+            }
         }
     }
 
-    /** 安装更新 */
-    async function settings_start_install() {
-        if (!download_file_path) return;
-        const { invoke } = window.__TAURI__.core;
+    _upd.btnDownload?.addEventListener('click', async () => {
+        if (!_latestRelease || !_latestRelease.assets?.length) return;
+
+        if (_downloadFilePath) {
+            _startInstall();
+            return;
+        }
+
         try {
-            update_els.btnDownload.disabled = true;
-            update_els.btnDownload.textContent = i18n.format_translate('settings.installing') || '正在安装...';
-            await invoke('update_install_release', { filePath: download_file_path });
+            const platform = await window.__TAURI__.core.invoke('app_fetch_platform');
+
+            _upd.btnDownload.style.display = 'none';
+            _upd.progress.style.display = '';
+            _upd.progressBar.style.width = '0%';
+            _upd.progressText.textContent = '0%';
+
+            offProgress();
+            await onProgress((p) => {
+                if (_downloadCancelled) return;
+                _upd.progressBar.style.width = p + '%';
+                _upd.progressText.textContent = Math.round(p) + '%';
+            });
+
+            _downloadFilePath = await startDownload(_latestRelease, platform, '');
+
+            offProgress();
+
+            _upd.progress.style.display = 'none';
+            _upd.btnDownload.style.display = '';
+            _upd.btnDownload.disabled = false;
+            _upd.btnDownload.textContent = i18n.format_translate('settings.installNow') || '立即安装';
+        } catch (err) {
+            console.error('Download failed:', err);
+            _upd.btnDownload.style.display = '';
+            _upd.btnDownload.disabled = false;
+            _upd.btnDownload.textContent = i18n.format_translate('settings.downloadUpdate') || '下载更新';
+            _upd.progress.style.display = 'none';
+        }
+    });
+
+    async function _startDownload() {
+        _upd.btnDownload.click();
+    }
+
+    async function _startInstall() {
+        if (!_downloadFilePath) return;
+        try {
+            _upd.btnDownload.disabled = true;
+            _upd.btnDownload.textContent = i18n.format_translate('settings.installing') || '正在安装...';
+            await installDownload(_downloadFilePath);
         } catch (error) {
             console.error('安装更新失败:', error);
-            update_els.btnDownload.disabled = false;
-            update_els.btnDownload.textContent = i18n.format_translate('settings.installNow') || '立即安装';
+            _upd.btnDownload.disabled = false;
+            _upd.btnDownload.textContent = i18n.format_translate('settings.installNow') || '立即安装';
             settings_show_dialog(i18n.format_translate('settings.installFailed') || '安装失败', String(error), 'error');
         }
-    }
-
-    update_els.btnDownload.onclick = settings_start_download;
-
-    // 取消下载按钮
-    const btnCancel = document.getElementById('btnCancelDownload');
-    if (btnCancel) {
-        btnCancel.addEventListener('click', async () => {
-            download_cancelled = true;
-            const { invoke } = window.__TAURI__.core;
-            try {
-                await invoke('update_download_cancel');
-            } catch (e) {
-                console.error('取消下载失败:', e);
-            }
-            update_els.progressText.textContent = '已取消';
-            btnCancel.disabled = true;
-        });
     }
 
     const linkGithub = document.getElementById('linkGithub');

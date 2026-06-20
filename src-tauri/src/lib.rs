@@ -1009,7 +1009,47 @@ struct GitHubRelease {
     assets: Vec<GitHubAsset>,
 }
 
-/// GitHub 版本检测结果
+/// SECTL latest-tag API 响应
+#[derive(Debug, Deserialize)]
+struct SectlLatestTagResponse {
+    #[allow(dead_code)]
+    success: bool,
+    #[allow(dead_code)]
+    project: Option<SectlProject>,
+    latest: Option<SectlLatestRelease>,
+    tag: Option<String>,
+    #[allow(dead_code)]
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct SectlProject {
+    id: String,
+    name: String,
+    slug: String,
+    repo: String,
+    cached_latest_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SectlLatestRelease {
+    #[allow(dead_code)]
+    tag: String,
+    name: Option<String>,
+    #[allow(dead_code)]
+    source: Option<String>,
+    html_url: Option<String>,
+    #[allow(dead_code)]
+    published_at: Option<String>,
+    #[allow(dead_code)]
+    prerelease: Option<bool>,
+    #[allow(dead_code)]
+    draft: Option<bool>,
+}
+
+/// 版本检测结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UpdateCheckResult {
     has_update: bool,
@@ -1076,9 +1116,10 @@ fn url_validate_github(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Tauri IPC 命令：检查 GitHub Release 是否有新版本
+/// Tauri IPC 命令：检查是否有新版本
 ///
-/// 通过 GitHub API 获取最新 Release 并与当前编译版本比较
+/// 通过 SECTL API 获取最新 Tag 并与当前编译版本比较，
+/// 有更新时再从 GitHub 拉取具体 Release 数据（已确认版本，非匿名探测）
 #[tauri::command]
 async fn update_fetch_check() -> Result<UpdateCheckResult, String> {
     let current_version = env!("CARGO_PKG_VERSION");
@@ -1090,52 +1131,80 @@ async fn update_fetch_check() -> Result<UpdateCheckResult, String> {
         .build()
         .map_err(|e| e.to_string())?;
     
+    // 1. 通过 SECTL 获取最新 Tag
     let response = client
-        .get("https://api.github.com/repos/ospneam/ViewStage/releases/latest")
+        .get("https://appwrite.sectl.cn/api/software/latest-tag?projectSlug=ViewStage")
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
     
     if !response.status().is_success() {
-        return Err(format!("GitHub API error: {}", response.status()));
+        return Err(format!("SECTL API error: {}", response.status()));
     }
     
-    let release: GitHubRelease = response
+    let sectl: SectlLatestTagResponse = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+        .map_err(|e| format!("Failed to parse SECTL response: {}", e))?;
     
-    if release.tag_name.is_empty() {
-        return Err("Invalid release: empty tag name".to_string());
+    if !sectl.success {
+        let desc = sectl.error_description.unwrap_or_default();
+        return Err(format!("SECTL API error: {}", desc));
     }
     
-    url_validate_github(&release.html_url)?;
+    let latest_tag = sectl.tag.ok_or("Missing tag in SECTL response")?;
+    if latest_tag.is_empty() {
+        return Err("Invalid SECTL response: empty tag".to_string());
+    }
     
-    let latest_version = release.tag_name.trim_start_matches('v');
+    let latest_version = latest_tag.trim_start_matches('v');
     let has_update = version_validate_newer(current_version, latest_version);
     
-    let current_tag = format!("v{}", current_version);
-    let current_release_response = client
-        .get(&format!("https://api.github.com/repos/ospneam/ViewStage/releases/tags/{}", current_tag))
-        .send()
-        .await;
-    
-    let current_release = if current_release_response.is_ok() {
-        let resp = current_release_response.unwrap();
-        if resp.status().is_success() {
-            resp.json::<GitHubRelease>().await.ok()
-        } else {
-            None
+    // 2. 有更新时获取该 Release 的详细数据（GitHub，已知版本）
+    let release = if has_update {
+        let github_url = format!(
+            "https://api.github.com/repos/ospneam/ViewStage/releases/tags/{}",
+            latest_tag
+        );
+        match client.get(&github_url).send().await {
+            Ok(resp) if resp.status().is_success() => resp.json::<GitHubRelease>().await.ok(),
+            _ => {
+                // 降级：用 SECTL 数据构建最小 release
+                let sectl_latest = sectl.latest.as_ref();
+                Some(GitHubRelease {
+                    tag_name: latest_tag.clone(),
+                    name: sectl_latest.and_then(|l| l.name.clone()),
+                    html_url: sectl_latest
+                        .and_then(|l| l.html_url.clone())
+                        .unwrap_or_default(),
+                    body: None,
+                    assets: vec![],
+                })
+            }
         }
     } else {
         None
+    };
+    
+    // 3. 尝试获取当前版本的 Release 信息（GitHub，已知版本）
+    let current_tag = format!("v{}", current_version);
+    let current_release = match client
+        .get(&format!(
+            "https://api.github.com/repos/ospneam/ViewStage/releases/tags/{}",
+            current_tag
+        ))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => resp.json::<GitHubRelease>().await.ok(),
+        _ => None,
     };
     
     Ok(UpdateCheckResult {
         has_update,
         current_version: current_version.to_string(),
         latest_version: latest_version.to_string(),
-        release: if has_update { Some(release) } else { None },
+        release,
         current_release,
     })
 }
@@ -1686,24 +1755,162 @@ async fn update_download_cancel() -> Result<(), String> {
     Ok(())
 }
 
-/// Tauri IPC 命令：从 GitHub Release 下载更新文件，支持镜像加速
+/// 通过 SECTL 分发接口下载文件
 ///
-/// 自动校验 URL 合法性，流式下载并向前端推送进度事件 "update-download-progress"。
-/// 使用镜像时，如果镜像下载失败会自动回退到原始地址重试一次。
+/// 调用 /api/software/download 获取 302 跳转，然后下载目标文件。
+async fn download_from_sectl(
+    app: &tauri::AppHandle,
+    file_path: &std::path::Path,
+    tag: &str,
+    file_name: &str,
+) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .user_agent("ViewStage")
+        .timeout(std::time::Duration::from_secs(300))
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+
+    let params = [
+        ("projectSlug", "ViewStage"),
+        ("tag", tag),
+        ("fileName", file_name),
+        ("source", "server"),
+    ];
+    let sectl_url = url::Url::parse_with_params(
+        "https://appwrite.sectl.cn/api/software/download",
+        &params,
+    )
+    .map_err(|e| format!("Failed to build SECTL URL: {}", e))?
+    .to_string();
+    log::info!("SECTL 下载请求: {}", sectl_url);
+
+    let response = client
+        .get(&sectl_url)
+        .send()
+        .await
+        .map_err(|e| format!("SECTL request failed: {}", e))?;
+
+    let status = response.status();
+
+    if !status.is_success() && status != reqwest::StatusCode::FOUND
+        && status != reqwest::StatusCode::MOVED_PERMANENTLY
+    {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("SECTL download failed (HTTP {}): {}", status, body));
+    }
+
+    let dl_url = if status == reqwest::StatusCode::FOUND
+        || status == reqwest::StatusCode::MOVED_PERMANENTLY
+    {
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| "SECTL 302 missing Location header".to_string())?
+            .to_string();
+        log::info!("SECTL 重定向到: {}", location);
+        location
+    } else {
+        log::info!("SECTL 直接返回文件内容 (HTTP {})", status);
+        sectl_url.clone()
+    };
+
+    let dl_response = if dl_url == sectl_url {
+        response
+    } else {
+        let download_client = reqwest::Client::builder()
+            .user_agent("ViewStage")
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .map_err(|e| format!("Failed to build download client: {}", e))?;
+        download_client
+            .get(&dl_url)
+            .send()
+            .await
+            .map_err(|e| format!("SECTL redirect download failed: {}", e))?
+    };
+
+    if !dl_response.status().is_success() {
+        return Err(format!(
+            "SECTL download HTTP {}",
+            dl_response.status()
+        ));
+    }
+
+    let total_size = dl_response.content_length().unwrap_or(0);
+    let mut file = std::fs::File::create(file_path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = dl_response.bytes_stream();
+    use futures::stream::StreamExt;
+    let mut last_reported: u32 = 0;
+
+    while let Some(chunk) = stream.next().await {
+        if DOWNLOAD_CANCELLED.load(Ordering::SeqCst) {
+            let _ = std::fs::remove_file(file_path);
+            return Err("Download cancelled".to_string());
+        }
+        let data = chunk.map_err(|e| format!("Read chunk error: {}", e))?;
+        file.write_all(&data)
+            .map_err(|e| format!("Write file error: {}", e))?;
+        downloaded += data.len() as u64;
+        if total_size > 0 {
+            let pct = (downloaded as f64 / total_size as f64 * 100.0) as u32;
+            if pct != last_reported {
+                last_reported = pct;
+                let _ = app.emit("update-download-progress", pct);
+            }
+        }
+    }
+
+    if total_size == 0 || last_reported < 100 {
+        let _ = app.emit("update-download-progress", 100);
+    }
+
+    file.flush().map_err(|e| format!("Flush file error: {}", e))?;
+    log::info!("SECTL 下载完成: {:?}", file_path);
+    Ok(())
+}
+
+/// Tauri IPC 命令：下载更新文件
+///
+/// 优先使用 SECTL 分发接口下载，失败时回退到 GitHub 镜像加速。
 #[tauri::command]
 async fn update_download_file(
     app: tauri::AppHandle,
     url: String,
     file_name: String,
     mirror_url: Option<String>,
+    version_tag: Option<String>,
 ) -> Result<String, String> {
-    // 重置取消标志
     DOWNLOAD_CANCELLED.store(false, Ordering::SeqCst);
     log::info!("开始下载更新，文件: {}, 镜像: {:?}", file_name, mirror_url);
 
+    let paths = AppPaths::new(&app)?;
+    let updates_dir = &paths.updates_dir;
+    std::fs::create_dir_all(updates_dir)
+        .map_err(|e| format!("Failed to create updates dir: {}", e))?;
+
+    let file_path = updates_dir.join(&file_name);
+    log::info!("保存路径: {:?}", file_path);
+
+    // 1. 尝试 SECTL 分发下载
+    if let Some(tag) = &version_tag {
+        match download_from_sectl(&app, &file_path, tag, &file_name).await {
+            Ok(()) => return Ok(file_path.to_string_lossy().to_string()),
+            Err(e) => {
+                log::warn!("SECTL 下载失败，回退到 GitHub: {}", e);
+            }
+        }
+    }
+
+    // 2. 回退：GitHub 镜像加速
+    log::info!("使用 GitHub 镜像回退下载: {}", file_name);
     url_validate_github(&url)?;
 
-    // 构建待尝试的 URL 列表：镜像优先，原始地址作为回退
     let use_mirror = mirror_url.as_ref().map_or(false, |m| !m.is_empty());
     let fallback_urls: Vec<String> = if use_mirror {
         let mirror = mirror_url.as_ref().unwrap();
@@ -1723,17 +1930,6 @@ async fn update_download_file(
             log::error!("创建 HTTP 客户端失败: {}", e);
             e.to_string()
         })?;
-
-    let paths = AppPaths::new(&app)?;
-    let updates_dir = &paths.updates_dir;
-    std::fs::create_dir_all(updates_dir)
-        .map_err(|e| {
-            log::error!("创建更新目录失败: {}", e);
-            format!("Failed to create updates dir: {}", e)
-        })?;
-
-    let file_path = updates_dir.join(&file_name);
-    log::info!("保存路径: {:?}", file_path);
 
     // 逐个尝试 URL，直到成功或全部失败
     let mut last_error = String::new();

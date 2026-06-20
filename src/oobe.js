@@ -2,6 +2,8 @@
  * ViewStage OOBE — 首次引导设置
  * 纯原生 JS，滑动向导
  */
+import { checkForUpdate, startDownload, onProgress, offProgress } from './modules/update/update.js';
+
 const invoke = window.__TAURI__?.core?.invoke;
 const _t = (key) => window.i18n?.format_translate(key) ?? key;
 
@@ -729,7 +731,7 @@ async function setupCheckUpdate() {
     showUpdateResult(state.updateResult);
   } else {
     if (statusEl) statusEl.innerHTML = `<div class="spinner"></div><div class="update-text">${_t('oobe.checkingUpdate')}</div>`;
-    checkForUpdate();
+    _checkForUpdate();
   }
 }
 
@@ -777,10 +779,6 @@ async function showUpdateResult(result) {
 
       try {
         const platform = await invoke('app_fetch_platform');
-        const patternMap = { windows: /\.(exe|msi)$/i, linux: /\.(deb|AppImage)$/i, macos: /\.dmg$/i };
-        const pattern = patternMap[platform] || /\.(exe|msi|deb|AppImage|dmg)$/i;
-        const asset = result.release.assets.find(a => pattern.test(a.name)) || result.release.assets[0];
-        const url = asset.browser_download_url;
 
         const progressEl = document.getElementById('updateProgress');
         const progressBar = document.getElementById('updateProgressBar');
@@ -791,15 +789,15 @@ async function showUpdateResult(result) {
         if (progressBar) progressBar.style.width = '0%';
         if (progressText) progressText.textContent = '0%';
 
-        const unlisten = await window.__TAURI__?.event?.listen('update-download-progress', (event) => {
-          const p = event.payload;
+        offProgress();
+        await onProgress((p) => {
           if (progressBar) progressBar.style.width = p + '%';
           if (progressText) progressText.textContent = Math.round(p) + '%';
         });
 
-        _downloadFilePath = await invoke('update_download_file', { url, fileName: asset.name, mirrorUrl: '' });
+        _downloadFilePath = await startDownload(result.release, platform, '');
 
-        if (unlisten) unlisten();
+        offProgress();
 
         if (progressEl) progressEl.style.display = 'none';
         if (downloadBtn) { downloadBtn.style.display = ''; downloadBtn.disabled = false; downloadBtn.textContent = _t('oobe.installNow') || 'Install Now'; }
@@ -824,13 +822,13 @@ async function showUpdateResult(result) {
   }
 }
 
-async function checkForUpdate() {
+async function _checkForUpdate() {
   const statusEl = document.getElementById('updateStatus');
   const notesEl = document.getElementById('updateNotes');
   if (notesEl) notesEl.style.display = 'none';
 
   try {
-    const result = await invoke('update_fetch_check');
+    const { result } = await checkForUpdate();
     state.updateChecked = true;
     state.updateResult = result;
     showUpdateResult(result);

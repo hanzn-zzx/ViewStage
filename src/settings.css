@@ -38,6 +38,18 @@ button {
     font-family: inherit;
 }
 
+/* 所有按钮黑白化（排除危险/重置/删除类） */
+button, .btn-base, .btn-primary, .btn-secondary, .btn-action,
+.btn-ghost, .btn-update, .btn-update-download, .btn-update-install,
+.btn-back, .btn-clear-cache, .sidebar-btn, .option-btn,
+.btn-close, .btn-icon-only {
+    filter: grayscale(1);
+}
+
+.btn-danger, .btn-reset, .btn-action.delete {
+    filter: none;
+}
+
 /* ===== 按钮 ===== */
 .btn-base {
     display: inline-flex;
@@ -344,6 +356,7 @@ button {
     right: 0;
     bottom: 0;
     overflow-y: auto;
+    height: 92vh;
 }
 
 .sidebar-btn {
@@ -1321,21 +1334,180 @@ button {
     border-color: #d4d4d4;
 }
 
-/* ===== 更新页面 ===== */
+/* ===== 更新页面 (OOBE 风格) ===== */
 #pageUpdate.active {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-start;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md, 16px);
     padding: var(--spacing-lg, 24px);
+    min-height: 100%;
+    box-sizing: border-box;
 }
 
-.update-container {
+#pageUpdate .update-app-info {
     display: flex;
     flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+#pageUpdate .update-app-info .update-logo {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    object-fit: contain;
+}
+
+#pageUpdate .update-app-info .update-app-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-ink);
+    letter-spacing: -0.3px;
+}
+
+#pageUpdate .update-banner {
     width: 100%;
-    max-width: 600px;
-    gap: var(--spacing-md, 16px);
+    max-width: 520px;
+}
+
+#pageUpdate .release-notes {
+    width: 100%;
+    max-width: 520px;
+    padding: 12px 16px;
+    background: var(--color-surface-card);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-muted);
+    max-height: 180px;
+    overflow-y: auto;
+    box-shadow:
+        0px 0px 0px 1px var(--color-hairline, rgba(255, 255, 255, 0.1)),
+        0px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#pageUpdate .release-notes h3,
+#pageUpdate .release-notes h4 {
+    color: var(--color-ink);
+    margin: 16px 0 8px;
+    font-weight: 600;
+}
+
+#pageUpdate .release-notes h3 { font-size: 14px; }
+#pageUpdate .release-notes h4 { font-size: 13px; }
+
+#pageUpdate .release-notes h3:first-child,
+#pageUpdate .release-notes h4:first-child {
+    margin-top: 0;
+}
+
+#pageUpdate .release-notes ul,
+#pageUpdate .release-notes ol {
+    padding-left: 20px;
+    margin: 6px 0;
+}
+
+#pageUpdate .release-notes li {
+    margin-bottom: 4px;
+}
+
+#pageUpdate .release-notes p {
+    margin: 8px 0;
+}
+
+#pageUpdate .release-notes p:first-child {
+    margin-top: 0;
+}
+
+#pageUpdate .release-notes code {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    padding: 2px 6px;
+    background: var(--color-surface-strong);
+    border-radius: 4px;
+    color: var(--color-brand-accent);
+}
+
+#pageUpdate .update-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 520px;
+}
+
+#pageUpdate .update-download-progress {
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+#pageUpdate .update-download-progress .progress-bar {
+    width: 100%;
+    height: 6px;
+}
+
+#pageUpdate .update-download-progress .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+}
+
+#pageUpdate .update-download-progress .progress-fill::after {
+    display: none;
+}
+
+#pageUpdate .update-download-progress .progress-label {
+    font-size: 13px;
+    color: var(--color-muted-soft);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+#updateStatus {
+    width: 100%;
+    max-width: 520px;
+    min-height: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+#updateStatus .spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--color-surface-strong);
+    border-top-color: var(--color-brand-accent);
+    border-radius: 50%;
+    animation: settings_spin 0.6s linear infinite;
+}
+
+@keyframes settings_spin {
+    to { transform: rotate(360deg); }
+}
+
+.update-text {
+    font-size: 13px;
+    color: var(--color-muted-soft);
+    text-align: center;
+}
+
+#pageUpdate .btn-update-download {
+    flex: 1;
+}
+
+#pageUpdate .btn-ghost {
+    flex: 1;
 }
 
 /* Shadow-as-border: 所有卡片统一使用 box-shadow 代替 CSS border */
