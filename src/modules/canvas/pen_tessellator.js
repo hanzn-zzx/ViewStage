@@ -115,8 +115,9 @@ class PenTessellator {
      * 渲染曲面细分后的笔画到 canvas
      * @param {CanvasRenderingContext2D} ctx - 画布上下文
      * @param {Object} tessellated_stroke - 细分笔画数据（segments 数组 + color 颜色）
+     * @param {number} scaleRatio - strokeScale / renderScale，用于线宽缩放转换
      */
-    tessellator_render_stroke(ctx, tessellated_stroke) {
+    tessellator_render_stroke(ctx, tessellated_stroke, scaleRatio = 1) {
         if (!tessellated_stroke || !tessellated_stroke.segments) return;
 
         const { segments, color } = tessellated_stroke;
@@ -134,8 +135,8 @@ class PenTessellator {
 
         for (let i = 0; i < len; i++) {
             const seg = segments[i];
-            const prevW = i > 0 ? segments[i - 1].line_width : seg.line_width;
-            const curW = seg.line_width;
+            const prevW = i > 0 ? segments[i - 1].line_width * scaleRatio : seg.line_width * scaleRatio;
+            const curW = seg.line_width * scaleRatio;
 
             let sx, sy, cx, cy, ex, ey, tail = false;
             if (i === 0) {

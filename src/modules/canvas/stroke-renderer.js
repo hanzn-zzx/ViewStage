@@ -47,6 +47,7 @@ export async function renderStrokesToContext(ctx, strokes, options = {}) {
     for (const stroke of strokes) {
         if (!stroke.points || stroke.points.length < 1) continue;
 
+        const hasStoredWidths = stroke.storedWidths && stroke.storedWidths.length > 0;
         const hasVariableWidths = stroke.variableWidths && stroke.variableWidths.length > 0;
         const strokeColor = stroke.color || DRAW_CONFIG.penColor;
         const strokeScale = stroke.scale || 1;
@@ -76,7 +77,7 @@ export async function renderStrokesToContext(ctx, strokes, options = {}) {
                 batch_flush();
                 const tessellated = penManager.build_tessellated_stroke(stroke, pen_effect);
                 if (tessellated) {
-                    penManager.render_tessellated_stroke(ctx, tessellated);
+                    penManager.render_tessellated_stroke(ctx, tessellated, strokeScale / renderScale);
                     continue;
                 }
             }
@@ -88,7 +89,7 @@ export async function renderStrokesToContext(ctx, strokes, options = {}) {
             batchIsErase = false;
         }
 
-        if (hasVariableWidths) {
+        if (hasStoredWidths || hasVariableWidths) {
             batch_flush();
             if (stroke.type === 'erase') {
                 const eraser = window.__eraser;
@@ -101,9 +102,14 @@ export async function renderStrokesToContext(ctx, strokes, options = {}) {
 
             for (let i = 0; i < stroke.points.length; i++) {
                 const point = stroke.points[i];
-                const lineWidth = stroke.variableWidths[i] !== undefined
-                    ? stroke.variableWidths[i] * strokeScale / renderScale
-                    : baseLineWidth;
+                let lineWidth;
+                if (hasStoredWidths && stroke.storedWidths[i] !== undefined) {
+                    lineWidth = stroke.storedWidths[i] * strokeScale / renderScale;
+                } else if (hasVariableWidths && stroke.variableWidths[i] !== undefined) {
+                    lineWidth = stroke.variableWidths[i] * strokeScale / renderScale;
+                } else {
+                    lineWidth = baseLineWidth;
+                }
                 const midX = (point.fromX + point.toX) / 2;
                 const midY = (point.fromY + point.toY) / 2;
 

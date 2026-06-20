@@ -430,11 +430,11 @@ class RealPenManager {
         return result;
     }
 
-    render_tessellated_stroke(ctx, tessellated_stroke) {
+    render_tessellated_stroke(ctx, tessellated_stroke, scaleRatio = 1) {
         this.init_tessellator();
         if (!this.tessellator || !tessellated_stroke) return false;
         
-        this.tessellator.tessellator_render_stroke(ctx, tessellated_stroke);
+        this.tessellator.tessellator_render_stroke(ctx, tessellated_stroke, scaleRatio);
         return true;
     }
     

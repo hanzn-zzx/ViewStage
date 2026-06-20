@@ -21,13 +21,19 @@ export function renderEraseSegment(ctx, fromX, fromY, toX, toY, lineWidth) {
 }
 
 export function renderEraseStroke(ctx, stroke, baseLineWidth, strokeScale, renderScale) {
+    const hasStoredWidths = stroke.storedWidths && stroke.storedWidths.length > 0;
     const hasVariableWidths = stroke.variableWidths && stroke.variableWidths.length > 0;
     ctx.beginPath();
     for (let i = 0; i < stroke.points.length; i++) {
         const pt = stroke.points[i];
-        const w = hasVariableWidths && stroke.variableWidths[i] !== undefined
-            ? stroke.variableWidths[i] * strokeScale / renderScale
-            : baseLineWidth;
+        let w;
+        if (hasStoredWidths && stroke.storedWidths[i] !== undefined) {
+            w = stroke.storedWidths[i] * strokeScale / renderScale;
+        } else if (hasVariableWidths && stroke.variableWidths[i] !== undefined) {
+            w = stroke.variableWidths[i] * strokeScale / renderScale;
+        } else {
+            w = baseLineWidth;
+        }
         renderEraseSegment(ctx, pt.fromX, pt.fromY, pt.toX, pt.toY, w);
     }
     ctx.fill();
