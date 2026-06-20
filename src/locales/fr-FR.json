@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "Activer le tableau noir pour dessiner et annoter",
     "memreductClean": "Nettoyage mémoire automatique",
     "memreductCleanHint": "Droits administrateur requis une fois (silencieux ensuite)",
+    "telemetry": "Télémétrie",
+    "telemetryHint": "Données usage uniquement, sans info personnelle",
     "canvasScale": "Échelle de la toile",
     "backgroundColor": "Arrière-plan",
     "dprLimit": "Qualité d'affichage",

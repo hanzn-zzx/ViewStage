@@ -1198,6 +1198,56 @@ async fn telemetry_http_get(url: String) -> Result<String, String> {
     Ok(text)
 }
 
+/// 获取 CPU 和 GPU 信息
+#[tauri::command]
+async fn telemetry_fetch_cpu_gpu() -> Result<String, String> {
+    let mut result = String::new();
+
+    // 获取 CPU 信息
+    let sys = sysinfo::System::new_all();
+    let cpus = sys.cpus();
+    if !cpus.is_empty() {
+        let cpu_brand = cpus[0].brand().trim();
+        if !cpu_brand.is_empty() {
+            result.push_str(cpu_brand);
+        }
+    }
+
+    // 获取 GPU 信息（Windows）
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        let output = Command::new("wmic")
+            .args(["path", "win32_VideoController", "get", "name"])
+            .output();
+
+        if let Ok(output) = output {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<&str> = stdout.lines().collect();
+            // 跳过第一行 "Name"，获取所有 GPU
+            let gpus: Vec<&str> = lines
+                .iter()
+                .skip(1)
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty())
+                .collect();
+
+            if !gpus.is_empty() {
+                if !result.is_empty() {
+                    result.push_str(" | ");
+                }
+                result.push_str(&gpus.join(", "));
+            }
+        }
+    }
+
+    if result.is_empty() {
+        result = "Unknown".to_string();
+    }
+
+    Ok(result)
+}
+
 /// 备份损坏的配置文件，文件名带时间戳
 fn config_backup_corrupted(config_path: &std::path::Path) {
     let parent = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -3734,7 +3784,8 @@ pub fn app_init_run() {
             memreduct_check_skipuac,
             memreduct_get_usage,
             telemetry_http_post,
-            telemetry_http_get
+            telemetry_http_get,
+            telemetry_fetch_cpu_gpu
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

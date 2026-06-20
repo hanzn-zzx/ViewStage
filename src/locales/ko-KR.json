@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "칠판을 활성화하여 그림 그리기 및 주석 달기",
     "memreductClean": "자동 메모리 정리",
     "memreductCleanHint": "최초 한 번 관리자 권한 필요 (이후 자동 실행)",
+    "telemetry": "텔레메트리 기능",
+    "telemetryHint": "텔레메트리 데이터는 사용 현황 분석에만 사용되며 개인 프라이버시 정보는 포함되지 않습니다",
     "canvasScale": "캔버스 배율",
     "backgroundColor": "배경색",
     "dprLimit": "표시 품질",

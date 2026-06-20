@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "Tafel zum Zeichnen und Annotieren aktivieren",
     "memreductClean": "Speicher auto bereinigen",
     "memreductCleanHint": "Einmal Administratorrechte erforderlich (danach automatisch)",
+    "telemetry": "Telemetrie",
+    "telemetryHint": "Nur Nutzungsanalyse, keine privaten Daten",
     "canvasScale": "Leinwandskalierung",
     "backgroundColor": "Hintergrund",
     "dprLimit": "Anzeigequalität",

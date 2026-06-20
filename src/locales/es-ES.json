@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "Activar la pizarra para dibujar y anotar",
     "memreductClean": "Limpieza auto memoria",
     "memreductCleanHint": "Se requieren derechos de administrador una vez (luego silencioso)",
+    "telemetry": "Telemetría",
+    "telemetryHint": "Solo análisis de uso, sin datos personales",
     "canvasScale": "Escala del lienzo",
     "backgroundColor": "Fondo",
     "dprLimit": "Calidad de visualización",

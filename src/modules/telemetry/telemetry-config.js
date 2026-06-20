@@ -13,3 +13,4 @@ export const REQUEST_TIMEOUT = 10000; // 10 秒
 export const GEO_REQUEST_TIMEOUT = 5000; // 5 秒
 
 export const API_ENDPOINT_ONLINE = '/api/stats/online';
+export const API_ENDPOINT_FIELD_VALUE = '/api/fields/values';

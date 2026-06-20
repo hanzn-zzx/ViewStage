@@ -6,6 +6,7 @@ import {
     STORAGE_KEY_GEO_CACHE,
     GEO_CACHE_TTL
 } from './telemetry-config.js';
+import { translateGeo } from './telemetry-geo-translate.js';
 
 /**
  * 从 localStorage 读取地理缓存，判定是否过期
@@ -18,7 +19,8 @@ export function getGeoCache() {
         if (!cached || !cached.fetched_at) return null;
         const age = Date.now() - cached.fetched_at;
         if (age >= GEO_CACHE_TTL) return null;
-        return cached;
+        // 翻译缓存中的地区名称为中文
+        return translateGeo(cached);
     } catch (e) {
         console.warn('[telemetry] geo cache read failed:', e);
         return null;
@@ -57,13 +59,14 @@ export async function fetchGeo() {
         });
 
         const data = JSON.parse(result);
-        return {
+        // 翻译地区名称为中文
+        return translateGeo({
             ip: data.ip || null,
             country_name: data.country_name || null,
             region: data.region || null,
             city: data.city || null,
             district: data.district || null
-        };
+        });
     } catch (e) {
         console.warn('[telemetry] geo fetch failed:', e);
         return null;

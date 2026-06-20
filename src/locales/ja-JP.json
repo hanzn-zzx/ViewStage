@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "描画と注釈用の黒板を有効にする",
     "memreductClean": "自動メモリクリーンアップ",
     "memreductCleanHint": "初回のみ管理者権限が必要（以降は自動実行）",
+    "telemetry": "テレメトリ機能",
+    "telemetryHint": "テレメトリデータは使用状況の分析のみに使用され、個人のプライバシー情報は含まれません",
     "canvasScale": "キャンバススケール",
     "backgroundColor": "背景色",
     "dprLimit": "表示品質",

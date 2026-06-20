@@ -496,6 +496,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     blackboardToggle.checked = blackboardEnabled;
                 }
 
+                const telemetryEnabled = settings.telemetryEnabled !== false;
+                const telemetryToggle = document.getElementById('telemetryToggle');
+                if (telemetryToggle) {
+                    telemetryToggle.checked = telemetryEnabled;
+                }
+
                 // 文档关联状态检测（功能检测）
                 async function checkAssociation(ext, statusElId) {
                     const statusEl = document.getElementById(statusElId);
@@ -1936,6 +1942,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 modalMessage.textContent = window.i18n?.format_translate('settings.languageChanged') || '需要重启应用才能生效。';
             }
             if (restartModal) restartModal.classList.add('active');
+        });
+    }
+
+    // 遥测功能开关
+    const telemetryToggle = document.getElementById('telemetryToggle');
+    if (telemetryToggle) {
+        telemetryToggle.addEventListener('change', async () => {
+            await settings_save_all_local({ telemetryEnabled: telemetryToggle.checked });
         });
     }
 

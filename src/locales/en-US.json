@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "Enable the blackboard for drawing and annotation",
     "memreductClean": "Auto Memory Cleanup",
     "memreductCleanHint": "Admin rights required once (silent after that)",
+    "telemetry": "Telemetry",
+    "telemetryHint": "Telemetry data is only used for usage analysis and does not contain any personal privacy information",
     "canvasScale": "Canvas Scale",
     "backgroundColor": "Background",
     "dprLimit": "Display Quality",

@@ -108,6 +108,8 @@
     "blackboardEnabledHint": "啟用小黑板進行繪圖和標註",
     "memreductClean": "記憶體自動清理",
     "memreductCleanHint": "需管理員授權（僅首次，之後自動靜默清理）",
+    "telemetry": "遙測功能",
+    "telemetryHint": "遙測資料僅用於分析使用情況，不包含任何個人隱私資訊",
     "canvasScale": "畫布縮放倍數",
     "backgroundColor": "畫布背景顏色",
     "dprLimit": "畫面精度",
